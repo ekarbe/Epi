@@ -1,0 +1,34 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-write-text-file",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-document-write",
+    "fs:allow-watch",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$DOCUMENT/Epi Library" },
+        { "path": "$DOCUMENT/Epi Library/**" }
+      ]
+    },
+    "dialog:default",
+    "os:default",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-load",
+    "store:default"
+  ]
+}
