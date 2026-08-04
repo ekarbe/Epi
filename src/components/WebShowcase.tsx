@@ -211,8 +211,8 @@ export function WebShowcase() {
               <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for Linux (Debian/Ubuntu and AppImage).</p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.0.0_amd64.deb" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .deb</a>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.0.0_amd64.AppImage" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download AppImage</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.0_amd64.deb" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .deb</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.0_amd64.AppImage" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download AppImage</a>
                 </div>
               </div>
             )}
@@ -221,8 +221,8 @@ export function WebShowcase() {
               <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for Windows 10/11 (64-bit).</p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.0.0_x64_en-US.msi" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .msi</a>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.0.0_x64-setup.exe" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .exe</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64_en-US.msi" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .msi</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64-setup.exe" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .exe</a>
                 </div>
               </div>
             )}
@@ -231,8 +231,8 @@ export function WebShowcase() {
               <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for macOS (Intel and Apple Silicon).</p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.0.0_aarch64.dmg" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Apple Silicon (M1/M2/M3)</a>
-                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.0.0_x64.dmg" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Intel Mac</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_aarch64.dmg" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Apple Silicon (M1/M2/M3)</a>
+                  <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64.dmg" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Intel Mac</a>
                 </div>
               </div>
             )}
@@ -331,7 +331,7 @@ export function WebShowcase() {
                 <ul style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem', paddingLeft: '1.5rem' }}>
                   <li><strong>macOS:</strong> If you see an "unidentified developer" warning, right-click (or Control-click) the Epi application icon in Finder, and select <strong>Open</strong> from the context menu.</li>
                   <li><strong>Windows:</strong> If Microsoft Defender SmartScreen blocks the app, click <strong>More info</strong> and then click <strong>Run anyway</strong>.</li>
-                  <li><strong>Linux (AppImage):</strong> Ensure the file is executable. You can do this in the terminal by running <code>chmod +x Epi_1.0.0_amd64.AppImage</code> before launching it.</li>
+                  <li><strong>Linux (AppImage):</strong> Ensure the file is executable. You can do this in the terminal by running <code>chmod +x Epi_1.1.0_amd64.AppImage</code> before launching it.</li>
                 </ul>
               </div>
             )}

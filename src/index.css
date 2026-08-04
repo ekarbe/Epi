@@ -82,6 +82,22 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 3rem;
 }
 
+.sticky-pill-container {
+  position: sticky;
+  top: 1rem;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sticky-pill-container > * {
+  pointer-events: auto;
+}
+
 .logo-container {
   display: flex;
   align-items: center;
