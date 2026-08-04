@@ -239,7 +239,8 @@ export function LibraryTab() {
     return recordings.filter(
       (rec) =>
         rec.filename.toLowerCase().includes(q) ||
-        (rec.label && rec.label.toLowerCase().includes(q))
+        (rec.label && rec.label.toLowerCase().includes(q)) ||
+        (rec.tags && rec.tags.some(tag => tag.toLowerCase().includes(q)))
     );
   }, [recordings, debouncedSearchQuery]);
 
@@ -262,7 +263,7 @@ export function LibraryTab() {
             <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
             <input
               type="text"
-              placeholder="Search recordings or labels..."
+              placeholder="Search titles or tags..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               style={{
