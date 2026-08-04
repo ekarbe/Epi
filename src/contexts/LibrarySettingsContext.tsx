@@ -61,6 +61,8 @@ export interface LibrarySettingsContextType {
   setOllamaModel: (model: string) => void;
   autoTranscribe: boolean;
   setAutoTranscribe: (v: boolean) => void;
+  namingSchema: string;
+  setNamingSchema: (v: string) => void;
   enableLogs: boolean;
   setEnableLogs: (v: boolean) => void;
   llmProvider: string;
@@ -357,6 +359,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
 
   const [transcriptionProvider, setTranscriptionProvider] = usePersistentState<string>('epi_transcription_provider', 'local');
   const [autoTranscribe, setAutoTranscribe] = usePersistentState<boolean>('epi_auto_transcribe', false);
+  const [namingSchema, setNamingSchema] = usePersistentState<string>('epi_naming_schema', 'Recording {DD}.{MM}.{YYYY} - {counter}');
   const [enableLogs, setEnableLogs] = usePersistentState<boolean>('epi_enable_logs', true);
 
   const [apiKeys, setApiKeysState] = useState<Record<string, string>>({});
@@ -829,6 +832,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     whisperXPrompt, setWhisperXPrompt, whisperXTemperature, setWhisperXTemperature,
     loadRecordingIntoAnalysis, triggerTranscription,
     autoTranscribe, setAutoTranscribe, enableLogs, setEnableLogs,
+    namingSchema, setNamingSchema,
     pendingLanguagePrompt, setPendingLanguagePrompt,
     handleRetryTranscription, handleCancelLanguagePrompt, handleTranscription,
     openaiTranscriptionModel, setOpenaiTranscriptionModel,
@@ -873,7 +877,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     transcriptionProvider, apiKeys,
     activeRecordingId, activeTranscriptId, activeTranscript, isTranscribing, transcribingIds,
     transcriptionError, diarized, activeSummary, isSummarizing, summarizingRecIds,
-    summaryError
+    summaryError, namingSchema
   ]);
 
   return (

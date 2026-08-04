@@ -16,7 +16,7 @@
 //
 
 import { BentoCard } from '../DashboardGrid';
-import { HardDrive, Cpu, Trash2, RefreshCw, Eye, EyeOff, Edit3 } from 'lucide-react';
+import { HardDrive, Cpu, Trash2, RefreshCw, Eye, EyeOff, Edit3, Mic, Settings } from 'lucide-react';
 import { useLibrarySettings } from '../../contexts/LibrarySettingsContext';
 import { useEffect, useState, useRef } from 'react';
 import { getStats, getRecordingsOlderThan30Days, deleteRecordingDb, getAutomations, createAutomation, deleteAutomation, Automation, getPrompts, createPrompt, updatePrompt, deletePrompt, PromptTemplate } from '../../services/db';
@@ -289,6 +289,7 @@ export function EngineTab() {
     intelligenceContextDepth, setIntelligenceContextDepth,
     intelligenceContextFormat, setIntelligenceContextFormat,
     enableLogs, setEnableLogs,
+    namingSchema, setNamingSchema,
     activeRecordingId,
     loadRecordingIntoAnalysis,
   } = useLibrarySettings();
@@ -514,13 +515,13 @@ export function EngineTab() {
 
   return (
     <>
-      <BentoCard className="ai-engine-card" style={{ gridColumn: 'span 12' }}>
+      <BentoCard className="system-prefs-card" style={{ gridColumn: 'span 12', marginBottom: '1.5rem' }}>
         <div className="card-title">
-          <Cpu />
-          AI Engine Stack
+          <Settings />
+          System Preferences
         </div>
 
-        <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
             <input 
               type="checkbox" 
@@ -532,6 +533,42 @@ export function EngineTab() {
               <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Saves logs for FFmpeg, WhisperX, LLMs, and general app events to the Logs folder.</span>
             </div>
           </label>
+        </div>
+      </BentoCard>
+
+      <BentoCard className="recording-engine-card" style={{ gridColumn: 'span 12', marginBottom: '1.5rem' }}>
+        <div className="card-title">
+          <Mic />
+          Recording Engine
+        </div>
+
+        <div style={{ marginBottom: '2.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>Recording Preferences</h3>
+          </div>
+          
+          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+            <label className="form-label">Naming Schema for New Recordings</label>
+            <SettingInput 
+              className="config-input" 
+              value={namingSchema} 
+              onSave={setNamingSchema} 
+            />
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem', lineHeight: '1.4' }}>
+              Available variables: <code>{'{title}'}</code> (Provided title), <code>{'{DD}'}</code> (Day), <code>{'{MM}'}</code> (Month), <code>{'{YYYY}'}</code> (Year), <code>{'{HH}'}</code> (Hour), <code>{'{mm}'}</code> (Minute), <code>{'{counter}'}</code> (Daily counter).
+            </p>
+          </div>
+
+          <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+              <input 
+                type="checkbox" 
+                checked={autoTranscribe} 
+                onChange={e => setAutoTranscribe(e.target.checked)} 
+              />
+              Auto-Transcribe after recording
+            </label>
+          </div>
         </div>
 
         <div id="ffmpeg-section" style={{ marginBottom: '2.5rem' }}>
@@ -601,23 +638,19 @@ export function EngineTab() {
             </div>
           )}
         </div>
+      </BentoCard>
+
+      <BentoCard className="ai-engine-card" style={{ gridColumn: 'span 12' }}>
+        <div className="card-title">
+          <Cpu />
+          AI Engine Stack
+        </div>
 
         <div style={{ marginBottom: '2.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0 }}>Transcription Engine</h3>
           </div>
           
-          <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-              <input 
-                type="checkbox" 
-                checked={autoTranscribe} 
-                onChange={e => setAutoTranscribe(e.target.checked)} 
-              />
-              Auto-Transcribe after recording
-            </label>
-          </div>
-
           <div className="segmented-control" style={{ marginBottom: '1.5rem' }}>
             {['local', 'openai', 'assembly', 'google'].map(p => (
               <button 

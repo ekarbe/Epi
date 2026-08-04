@@ -19,7 +19,7 @@ import { SessionProvider } from './SessionContext';
 import { saveRecording } from '../services/db';
 
 function SessionIntegration({ children }: { children: ReactNode }) {
-  const { refreshLibrary, autoTranscribe, handleTranscription, loadRecordingIntoAnalysis, enableLogs } = useLibrarySettings();
+  const { refreshLibrary, autoTranscribe, handleTranscription, loadRecordingIntoAnalysis, enableLogs, namingSchema, recordings } = useLibrarySettings();
 
   const handleRecordingStopped = async (savedPaths: string[], duration: number, label: string | null) => {
     const recIds: number[] = [];
@@ -51,7 +51,12 @@ function SessionIntegration({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SessionProvider onRecordingStopped={handleRecordingStopped} enableLogs={enableLogs} >
+    <SessionProvider 
+      onRecordingStopped={handleRecordingStopped} 
+      enableLogs={enableLogs}
+      namingSchema={namingSchema}
+      recordings={recordings}
+    >
       {children}
     </SessionProvider>
   );
