@@ -58,6 +58,16 @@ export interface LibraryRow {
   tags?: string;
 }
 
+export interface Tag {
+  name: string;
+  context: string;
+}
+
+export interface GlossaryTerm {
+  term: string;
+  meaning: string;
+}
+
 export interface TableInfoRow {
   cid: number;
   name: string;

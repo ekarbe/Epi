@@ -34,6 +34,14 @@ export async function initDb(): Promise<Database> {
       await loadedDb.execute('PRAGMA foreign_keys = ON;');
 
       await loadedDb.execute(`
+        CREATE TABLE IF NOT EXISTS Tags (
+          name TEXT PRIMARY KEY,
+          context TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS Glossary (
+          term TEXT PRIMARY KEY,
+          meaning TEXT NOT NULL DEFAULT ''
+        );
         CREATE TABLE IF NOT EXISTS Recordings (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           filename TEXT NOT NULL,

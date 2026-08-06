@@ -28,6 +28,7 @@ export interface OllamaAdvancedOptions {
   system?: string;
   temperature?: number;
   num_ctx?: number;
+  num_predict?: number;
   top_p?: number;
   top_k?: number;
   timeoutMs?: number;
@@ -106,6 +107,7 @@ export async function summarizeTranscript(
       system: advanced.system || '',
       temperature: advanced.temperature,
       numCtx: advanced.num_ctx,
+      numPredict: advanced.num_predict,
       topP: advanced.top_p,
       topK: advanced.top_k,
       timeoutMs: advanced.timeoutMs || 300000,

@@ -78,6 +78,8 @@ struct OllamaOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     num_ctx: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    num_predict: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_k: Option<u32>,
@@ -122,6 +124,7 @@ pub async fn generate_local_summary(
     system: String,
     temperature: Option<f64>,
     num_ctx: Option<u32>,
+    num_predict: Option<i32>,
     top_p: Option<f64>,
     top_k: Option<u32>,
     timeout_ms: Option<u64>,
@@ -139,6 +142,7 @@ pub async fn generate_local_summary(
         options: OllamaOptions {
             temperature,
             num_ctx,
+            num_predict,
             top_p,
             top_k,
         },

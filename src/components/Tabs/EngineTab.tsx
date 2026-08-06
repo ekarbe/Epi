@@ -22,6 +22,8 @@ import { useEffect, useState, useRef } from 'react';
 import { getStats, getRecordingsOlderThan30Days, deleteRecordingDb, getAutomations, createAutomation, deleteAutomation, Automation, getPrompts, createPrompt, updatePrompt, deletePrompt, PromptTemplate } from '../../services/db';
 import { getAvailableModels } from '../../services/ollama';
 import { invoke } from '../../lib/api';
+import { GlossaryTagsSection } from './GlossaryTagsSection';
+import { CollapsibleCategory } from './CollapsibleCategory';
 
 /**
  * List of local WhisperX models supported by the application.
@@ -283,6 +285,7 @@ export function EngineTab() {
     googleLlmModel, setGoogleLlmModel,
     ollamaTemperature, setOllamaTemperature,
     ollamaNumCtx, setOllamaNumCtx,
+    ollamaNumPredict, setOllamaNumPredict,
     ollamaTopP, setOllamaTopP,
     ollamaTopK, setOllamaTopK,
     ollamaSystemPrompt, setOllamaSystemPrompt,
@@ -515,11 +518,13 @@ export function EngineTab() {
 
   return (
     <>
-      <BentoCard className="system-prefs-card" style={{ gridColumn: 'span 12', marginBottom: '1.5rem' }}>
-        <div className="card-title">
-          <Settings />
-          System Preferences
-        </div>
+      <CollapsibleCategory 
+        className="system-prefs-card" 
+        title="System Preferences" 
+        icon={Settings} 
+        description="Configure app logging and global system preferences."
+        defaultOpen={false}
+      >
 
         <div style={{ display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
@@ -534,13 +539,15 @@ export function EngineTab() {
             </div>
           </label>
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="recording-engine-card" style={{ gridColumn: 'span 12', marginBottom: '1.5rem' }}>
-        <div className="card-title">
-          <Mic />
-          Recording Engine
-        </div>
+      <CollapsibleCategory 
+        className="recording-engine-card" 
+        title="Recording Engine" 
+        icon={Mic} 
+        description="Configure FFmpeg, naming schemas, and auto-transcription."
+        defaultOpen={false}
+      >
 
         <div style={{ marginBottom: '2.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -638,13 +645,15 @@ export function EngineTab() {
             </div>
           )}
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="ai-engine-card" style={{ gridColumn: 'span 12' }}>
-        <div className="card-title">
-          <Cpu />
-          AI Engine Stack
-        </div>
+      <CollapsibleCategory 
+        className="ai-engine-card" 
+        title="AI Engine Stack" 
+        icon={Cpu} 
+        description="Manage local and cloud models for transcription (Whisper) and summarization (Ollama)."
+        defaultOpen={false}
+      >
 
         <div style={{ marginBottom: '2.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -933,7 +942,7 @@ export function EngineTab() {
                 min={0} 
                 max={20} 
               />
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>Number of related recordings to pull per tag. Set to 0 to disable.</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>Number of related recordings to pull per tag. <b>Note:</b> Using this feature triggers a second LLM pass, which increases processing time and API usage. Set to 0 to disable.</p>
             </div>
             
             <div className="form-group" style={{ flex: 1 }}>
@@ -1031,6 +1040,11 @@ export function EngineTab() {
                       <label className="form-label">Context Window (num_ctx)</label>
                       <SettingNumberInput className="config-input" value={ollamaNumCtx} onSave={setOllamaNumCtx} min={512} max={131072} />
                     </div>
+                    <div className="form-group" style={{ flex: '1 1 45%' }}>
+                      <label className="form-label">Max Output Tokens (num_predict)</label>
+                      <SettingNumberInput className="config-input" value={ollamaNumPredict} onSave={setOllamaNumPredict} min={-1} max={131072} />
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>-1 allows reasoning models to think fully.</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1072,7 +1086,7 @@ export function EngineTab() {
             )}
           </div>
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
       {confirmationModal && (
         <div className="modal-overlay">
@@ -1117,9 +1131,14 @@ export function EngineTab() {
         </div>
       )}
 
-      <BentoCard className="automation-card" style={{ gridColumn: '1 / -1' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.8rem', margin: 0 }}>Automation & Groups</h2>
+      <GlossaryTagsSection />
+      
+      <CollapsibleCategory 
+        className="automation-card" 
+        title="Automation & Groups"
+        description="Configure rules to automatically transcribe and summarize recordings on a schedule."
+        defaultOpen={false}
+        headerAction={
           <button 
             className="btn-primary" 
             style={{ width: 'auto', background: 'white', color: 'black' }}
@@ -1127,7 +1146,8 @@ export function EngineTab() {
           >
             {showAutomationForm ? 'Cancel' : 'New Rule'}
           </button>
-        </div>
+        }
+      >
 
         {showAutomationForm && (
           <div style={{ background: 'var(--card-bg-solid)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid var(--card-border)', marginBottom: '1.5rem' }}>
@@ -1180,11 +1200,14 @@ export function EngineTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No automation rules configured.</div>
           )}
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="prompts-card" style={{ gridColumn: '1 / -1' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.8rem', margin: 0 }}>Prompt Templates</h2>
+      <CollapsibleCategory 
+        className="prompts-card" 
+        title="Prompt Templates"
+        description="Manage custom prompt templates for LLM summarization."
+        defaultOpen={false}
+        headerAction={
           <button 
             className="btn-primary" 
             style={{ width: 'auto', background: 'white', color: 'black' }}
@@ -1197,7 +1220,8 @@ export function EngineTab() {
           >
             {showPromptForm ? 'Cancel' : 'New Template'}
           </button>
-        </div>
+        }
+      >
 
         {showPromptForm && (
           <div ref={promptFormRef} style={{ background: 'var(--card-bg-solid)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid var(--card-border)', marginBottom: '1.5rem' }}>
@@ -1254,13 +1278,15 @@ export function EngineTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No prompt templates configured.</div>
           )}
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="storage-card" style={{ gridColumn: 'span 12' }}>
-        <div className="card-title">
-          <HardDrive style={{ color: 'var(--accent-amber)' }} />
-          Storage
-        </div>
+      <CollapsibleCategory 
+        className="storage-card" 
+        title="Storage Status" 
+        icon={HardDrive}
+        description="Review disk usage and clean up old recordings or logs."
+        defaultOpen={false}
+      >
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2rem 0' }}>
           <h2 style={{ fontSize: '2.5rem', margin: '0 0 0.5rem 0' }}>{formatSize(storageBreakdown.total)}</h2>
@@ -1342,7 +1368,7 @@ export function EngineTab() {
           <Trash2 size={18} style={{ color: 'var(--accent-amber)' }} />
           <span style={{ color: 'var(--text-primary)' }}>Clean All Logs</span>
         </button>
-      </BentoCard>
+      </CollapsibleCategory>
     </>
   );
 }
