@@ -77,6 +77,8 @@ describe('AppProviders', () => {
       autoTranscribe: true,
       handleTranscription: handleTranscriptionMock,
       loadRecordingIntoAnalysis: loadRecordingMock,
+      namingSchema: 'Recording {counter}',
+      recordings: [],
     } as any);
 
 
@@ -117,6 +119,8 @@ describe('AppProviders', () => {
       autoTranscribe: true,
       handleTranscription: undefined,
       loadRecordingIntoAnalysis: loadRecordingMock,
+      namingSchema: 'Recording {counter}',
+      recordings: [],
     } as any);
 
     render(

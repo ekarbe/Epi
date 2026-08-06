@@ -269,6 +269,16 @@ Transcript:
         timerange_hours: 120,
         action: "summarize"
       }
+    ],
+    Glossary: [
+      { term: 'Tauri', meaning: 'A framework for building tiny, blazingly fast binaries for all major desktop platforms.' },
+      { term: 'FFmpeg', meaning: 'A complete, cross-platform solution to record, convert and stream audio and video.' }
+    ],
+    Tags: [
+      { id: 1, name: 'frontend', context: 'UI updates and components.' },
+      { id: 2, name: 'design', context: 'Discussing aesthetics and UX.' },
+      { id: 3, name: 'sync', context: 'Regular team sync.' },
+      { id: 4, name: 'urgent', context: 'High priority tasks.' }
     ]
   };
 
@@ -278,7 +288,8 @@ Transcript:
     Summaries: 3,
     Groups: 1,
     Prompts: 3,
-    Automations: 3
+    Automations: 3,
+    Tags: 5
   };
 
   static async load(path: string): Promise<MockDatabase> {
@@ -332,6 +343,49 @@ Transcript:
       return { lastInsertId: 0, rowsAffected: 1 };
     }
 
+    if (query.toUpperCase().includes('INSERT INTO GLOSSARY')) {
+      const term = bindValues![0];
+      const meaning = bindValues![1];
+      const existing = this.tables.Glossary.find(g => g.term === term);
+      if (existing) existing.meaning = meaning;
+      else this.tables.Glossary.push({ term, meaning });
+      return { lastInsertId: 0, rowsAffected: 1 };
+    }
+    
+    if (query.toUpperCase().includes('DELETE FROM GLOSSARY')) {
+      const term = bindValues![0];
+      this.tables.Glossary = this.tables.Glossary.filter(g => g.term !== term);
+      return { lastInsertId: 0, rowsAffected: 1 };
+    }
+
+    if (query.toUpperCase().includes('INSERT INTO TAGS')) {
+      const name = bindValues![0];
+      const context = bindValues![1] || '';
+      const existing = this.tables.Tags.find(t => t.name === name);
+      if (existing) existing.context = context;
+      else {
+        const id = this.idCounters.Tags++;
+        this.tables.Tags.push({ id, name, context });
+      }
+      return { lastInsertId: 0, rowsAffected: 1 };
+    }
+
+    if (query.toUpperCase().includes('INSERT OR IGNORE INTO TAGS')) {
+      const name = bindValues![0];
+      const existing = this.tables.Tags.find(t => t.name === name);
+      if (!existing) {
+        const id = this.idCounters.Tags++;
+        this.tables.Tags.push({ id, name, context: '' });
+      }
+      return { lastInsertId: 0, rowsAffected: 1 };
+    }
+
+    if (query.toUpperCase().includes('DELETE FROM TAGS')) {
+      const name = bindValues![0];
+      this.tables.Tags = this.tables.Tags.filter(t => t.name !== name);
+      return { lastInsertId: 0, rowsAffected: 1 };
+    }
+
     return { lastInsertId: 0, rowsAffected: 0 };
   }
 
@@ -378,6 +432,14 @@ Transcript:
 
     if (query.includes('FROM Automations')) {
       return this.tables.Automations.sort((a,b) => b.id - a.id) as any;
+    }
+
+    if (query.includes('FROM Glossary')) {
+      return this.tables.Glossary as any;
+    }
+    
+    if (query.includes('FROM Tags')) {
+      return this.tables.Tags as any;
     }
     
     if (query.includes('COUNT(*)')) {
@@ -460,14 +522,18 @@ export const convertFileSrc = isTauri ? TauriCore.convertFileSrc : (path: string
 };
 export const platform = isTauri ? TauriOs.platform : () => 'mock-os';
 
+const MOCK_STORE: Record<string, any> = {
+  'epi_naming_schema': '{title}_{YYYY}{MM}{DD}_{counter}'
+};
+
 export const loadStore = async (path: string) => {
   if (isTauri) {
     const { load } = await import('@tauri-apps/plugin-store');
     return load(path);
   }
   return {
-    get: async <T>(_key: string) => null as T,
-    set: async (_key: string, _value: any) => {},
+    get: async <T>(key: string) => MOCK_STORE[key] as T,
+    set: async (key: string, value: any) => { MOCK_STORE[key] = value; },
     save: async () => {}
   } as any;
 };

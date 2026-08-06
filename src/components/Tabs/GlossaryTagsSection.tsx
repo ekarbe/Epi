@@ -8,12 +8,10 @@ export function GlossaryTagsSection() {
   const { refreshLibrary } = useLibrarySettings();
   const [tags, setTags] = useState<Tag[]>([]);
   const [glossary, setGlossary] = useState<GlossaryTerm[]>([]);
-  const [loading, setLoading] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newGlossaryTerm, setNewGlossaryTerm] = useState('');
-  
+
   const loadData = async () => {
-    setLoading(true);
     try {
       const fetchedTags = await getTags();
       setTags(fetchedTags);
@@ -21,8 +19,6 @@ export function GlossaryTagsSection() {
       setGlossary(fetchedGlossary);
     } catch (e) {
       console.error('Failed to load glossary/tags', e);
-    } finally {
-      setLoading(false);
     }
   };
 

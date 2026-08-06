@@ -80,7 +80,6 @@ export function AnalysisTab() {
   const [editedSummary, setEditedSummary] = useState('');
   const [isAudioMissing, setIsAudioMissing] = useState(false);
   const [isAudioTooLarge, setIsAudioTooLarge] = useState(false);
-  const [newTagInput, setNewTagInput] = useState('');
 
   const handleAddTag = async (tagToSave: string) => {
     if (!activeRecording) return;
@@ -528,7 +527,6 @@ export function AnalysisTab() {
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', background: activeTranscript ? 'white' : 'var(--card-bg)', color: activeTranscript ? 'black' : 'var(--text-secondary)', opacity: activeTranscript ? 1 : 0.5, cursor: activeTranscript ? 'pointer' : 'not-allowed' }}
           onClick={async () => {
             const tags = activeRecording?.tags || [];
-            let fullPrompt = promptTemplate;
             
             let relatedContextBlock = '';
             if (tags.length > 0 && intelligenceContextDepth > 0) {

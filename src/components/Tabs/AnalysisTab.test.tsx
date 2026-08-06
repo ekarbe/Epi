@@ -31,11 +31,13 @@ vi.mock('../../contexts/SessionContext', () => ({
 }));
 
 vi.mock('../../services/db', () => ({
-  getPrompts: vi.fn(),
+  getPrompts: vi.fn().mockResolvedValue([]),
   getRawRecordingById: vi.fn(),
   updateRecordingTags: vi.fn(),
   getTranscriptForRecording: vi.fn(),
   getSummaryForTranscript: vi.fn(),
+  getTags: vi.fn().mockResolvedValue([]),
+  ensureTagExists: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../lib/api', () => ({

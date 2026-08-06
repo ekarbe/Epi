@@ -584,7 +584,7 @@ export function EngineTab() {
         title="System Preferences" 
         icon={Settings} 
         description="Configure app logging and global system preferences."
-        defaultOpen={false}
+        defaultOpen={true}
       >
 
         <div style={{ display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
@@ -607,7 +607,7 @@ export function EngineTab() {
         title="Recording Engine" 
         icon={Mic} 
         description="Configure FFmpeg, naming schemas, and auto-transcription."
-        defaultOpen={false}
+        defaultOpen={true}
       >
 
         <div style={{ marginBottom: '2.5rem' }}>
@@ -713,7 +713,7 @@ export function EngineTab() {
         title="AI Engine Stack" 
         icon={Cpu} 
         description="Manage local and cloud models for transcription (Whisper) and summarization (Ollama)."
-        defaultOpen={false}
+        defaultOpen={true}
       >
 
         <div style={{ marginBottom: '2.5rem' }}>
@@ -1236,7 +1236,7 @@ export function EngineTab() {
         className="automation-card" 
         title="Automation & Groups"
         description="Configure rules to automatically transcribe and summarize recordings on a schedule."
-        defaultOpen={false}
+        defaultOpen={true}
         headerAction={
           <button 
             className="btn-primary" 
@@ -1305,7 +1305,7 @@ export function EngineTab() {
         className="prompts-card" 
         title="Prompt Templates"
         description="Manage custom prompt templates for LLM summarization."
-        defaultOpen={false}
+        defaultOpen={true}
         headerAction={
           <button 
             className="btn-primary" 
@@ -1384,7 +1384,7 @@ export function EngineTab() {
         title="Storage Status" 
         icon={HardDrive}
         description="Review disk usage and clean up old recordings or logs."
-        defaultOpen={false}
+        defaultOpen={true}
       >
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2rem 0' }}>
