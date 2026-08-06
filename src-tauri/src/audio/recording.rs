@@ -781,7 +781,7 @@ mod tests {
             std::fs::write(&fake_ffmpeg, "@echo off\ntimeout /t 2 /nobreak >nul\n").unwrap();
         }
 
-        let docs = dirs::document_dir().unwrap();
+        let docs = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
         let epi_lib = docs.join("Epi Library");
         let rec_dir = epi_lib.join("Recordings");
         let logs_dir = epi_lib.join("Logs");

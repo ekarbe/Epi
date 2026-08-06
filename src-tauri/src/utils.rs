@@ -32,8 +32,14 @@ use std::path::{Path, PathBuf};
 ///   or out-of-bounds library folder access is attempted.
 pub fn validate_path_in_library<P: AsRef<Path>>(path: P) -> Result<PathBuf, String> {
     let path = path.as_ref();
+    
+    #[cfg(not(test))]
     let docs_dir = dirs::document_dir()
         .ok_or_else(|| "Could not find documents directory".to_string())?;
+        
+    #[cfg(test)]
+    let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+
     let library_dir = docs_dir.join("Epi Library");
 
     // Resolve target path absolute representation
