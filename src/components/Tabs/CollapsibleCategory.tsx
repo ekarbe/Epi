@@ -35,7 +35,7 @@ export function CollapsibleCategory({
             {Icon && <Icon size={24} />}
             <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{title}</h2>
           </div>
-          {headerAction && (
+          {headerAction && isOpen && (
             <div onClick={e => e.stopPropagation()}>
               {headerAction}
             </div>

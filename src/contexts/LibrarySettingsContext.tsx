@@ -136,6 +136,12 @@ export interface LibrarySettingsContextType {
   removeTranscribingId: (id: number) => void;
   addSummarizingRecId: (id: number) => void;
   removeSummarizingRecId: (id: number) => void;
+  downloadingOllamaModel: string | null;
+  setDownloadingOllamaModel: (model: string | null) => void;
+  ollamaDownloadProgress: number;
+  setOllamaDownloadProgress: (progress: number) => void;
+  ollamaDownloadError: string | null;
+  setOllamaDownloadError: (error: string | null) => void;
 }
 
 
@@ -355,6 +361,10 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
   const [ollamaTopP, setOllamaTopP] = usePersistentState<number>('epi_ollama_top_p', 0.9);
   const [ollamaTopK, setOllamaTopK] = usePersistentState<number>('epi_ollama_top_k', 10);
   const [ollamaSystemPrompt, setOllamaSystemPrompt] = usePersistentState<string>('epi_ollama_system_prompt', '');
+
+  const [downloadingOllamaModel, setDownloadingOllamaModel] = useState<string | null>(null);
+  const [ollamaDownloadProgress, setOllamaDownloadProgress] = useState<number>(0);
+  const [ollamaDownloadError, setOllamaDownloadError] = useState<string | null>(null);
 
   const [intelligenceContextDepth, setIntelligenceContextDepth] = usePersistentState<number>('epi_intelligence_context_depth', 5);
   const [intelligenceContextFormat, setIntelligenceContextFormat] = usePersistentState<string>('epi_intelligence_context_format', 'summaries');
@@ -933,7 +943,9 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
     updateActiveTranscript,
     activeSummary, isSummarizing, summarizingRecIds, summaryError, generateSummary,
     updateActiveSummary,
-    addTranscribingId, removeTranscribingId, addSummarizingRecId, removeSummarizingRecId
+    addTranscribingId, removeTranscribingId, addSummarizingRecId, removeSummarizingRecId,
+    downloadingOllamaModel, setDownloadingOllamaModel, ollamaDownloadProgress, setOllamaDownloadProgress,
+    ollamaDownloadError, setOllamaDownloadError
   }), [
     isDark, dbReady, dbError,
     activeTab, recordings, refreshLibrary, llmProvider, ollamaUrl, ollamaModel,
@@ -949,7 +961,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
     transcriptionProvider, apiKeys,
     activeRecordingId, activeTranscriptId, activeTranscript, isTranscribing, transcribingIds,
     transcriptionError, diarized, activeSummary, isSummarizing, summarizingRecIds,
-    summaryError, namingSchema
+    summaryError, namingSchema, downloadingOllamaModel, ollamaDownloadProgress, ollamaDownloadError
   ]);
 
   return (

@@ -15,12 +15,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { BentoCard } from '../DashboardGrid';
+// import { BentoCard } from '../DashboardGrid';
 import { HardDrive, Cpu, Trash2, RefreshCw, Eye, EyeOff, Edit3, Mic, Settings } from 'lucide-react';
 import { useLibrarySettings } from '../../contexts/LibrarySettingsContext';
 import { useEffect, useState, useRef } from 'react';
 import { getStats, getRecordingsOlderThan30Days, deleteRecordingDb, getAutomations, createAutomation, deleteAutomation, Automation, getPrompts, createPrompt, updatePrompt, deletePrompt, PromptTemplate } from '../../services/db';
-import { getAvailableModels } from '../../services/ollama';
+import { getAvailableModels, pullModel, deleteModel } from '../../services/ollama';
 import { invoke } from '../../lib/api';
 import { GlossaryTagsSection } from './GlossaryTagsSection';
 import { CollapsibleCategory } from './CollapsibleCategory';
@@ -29,6 +29,15 @@ import { CollapsibleCategory } from './CollapsibleCategory';
  * List of local WhisperX models supported by the application.
  */
 const WHISPER_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'];
+
+/**
+ * Recommended Ollama models and their estimated disk space (in GB).
+ */
+const RECOMMENDED_OLLAMA_MODELS = [
+  { name: 'llama3', sizeGB: 4.7 },
+  { name: 'phi3', sizeGB: 2.3 },
+  { name: 'mistral', sizeGB: 4.1 },
+];
 
 /**
  * Formats a byte size into a human-readable string.
@@ -295,6 +304,9 @@ export function EngineTab() {
     namingSchema, setNamingSchema,
     activeRecordingId,
     loadRecordingIntoAnalysis,
+    downloadingOllamaModel, setDownloadingOllamaModel,
+    ollamaDownloadProgress, setOllamaDownloadProgress,
+    ollamaDownloadError, setOllamaDownloadError
   } = useLibrarySettings();
 
   const [stats, setStats] = useState({ recordingsCount: 0, transcriptsCount: 0 });
@@ -491,6 +503,55 @@ export function EngineTab() {
       console.error("Failed to fetch old recordings:", err);
       setAlertModal({ title: "Error", message: "Failed to find old recordings.", isError: true });
     }
+  };
+
+  const handleDownloadOllamaModel = async (modelName: string, sizeGB: number) => {
+    setDownloadingOllamaModel(modelName);
+    setOllamaDownloadProgress(0);
+    setOllamaDownloadError(null);
+    try {
+      const freeSpaceBytes = await invoke<number>('get_available_disk_space');
+      const requiredBytes = (sizeGB + 2) * 1024 * 1024 * 1024;
+      if (freeSpaceBytes < requiredBytes) {
+        setAlertModal({ 
+          title: 'Disk Space Warning', 
+          message: `Not enough disk space. ${modelName} requires ${sizeGB}GB, plus a 2GB buffer, but you only have ${formatSize(freeSpaceBytes)} free.`, 
+          isError: true 
+        });
+        setDownloadingOllamaModel(null);
+        return;
+      }
+      
+      await pullModel(ollamaUrl, modelName, (percent) => {
+        setOllamaDownloadProgress(percent);
+      });
+      refreshModels();
+    } catch (err: any) {
+      console.error('Failed to pull Ollama model:', err);
+      setOllamaDownloadError(`Failed to download ${modelName}: Make sure Ollama is running.`);
+    } finally {
+      setDownloadingOllamaModel(null);
+    }
+  };
+
+  const handleDeleteOllamaModel = async (modelName: string) => {
+    setOllamaDownloadError(null);
+    setConfirmationModal({
+      title: "Delete Model",
+      message: `Are you sure you want to delete the model ${modelName}?`,
+      actionLabel: "Delete",
+      isDestructive: true,
+      onConfirm: async () => {
+        setConfirmationModal(null);
+        try {
+          await deleteModel(ollamaUrl, modelName);
+          refreshModels();
+        } catch (err: any) {
+          console.error("Failed to delete model:", err);
+          setOllamaDownloadError(`Failed to delete ${modelName}: ${err.message || String(err)}`);
+        }
+      }
+    });
   };
 
   const refreshModels = () => {
@@ -1006,6 +1067,44 @@ export function EngineTab() {
                       ))
                     )}
                   </select>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                  <label className="form-label">Local Model Manager</label>
+                  {ollamaDownloadError && (
+                    <div style={{ color: 'var(--accent-red)', fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255, 69, 58, 0.1)', borderRadius: '4px', border: '1px solid rgba(255, 69, 58, 0.2)' }}>
+                      {ollamaDownloadError}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '0.5rem', padding: '0.5rem' }}>
+                    {RECOMMENDED_OLLAMA_MODELS.map((model) => {
+                      const installedModel = availableOllamaModels.find(m => m === model.name || m.startsWith(`${model.name}:`));
+                      const isDownloaded = !!installedModel;
+                      const isDownloading = downloadingOllamaModel === model.name;
+                      return (
+                        <div key={model.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem', background: 'transparent', borderRadius: '4px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '0.85rem', color: isDownloaded ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{model.name}</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>~{model.sizeGB} GB</span>
+                          </div>
+                          <div>
+                            {isDownloading ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ width: '60px', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${ollamaDownloadProgress}%`, height: '100%', background: 'var(--accent-blue)', transition: 'width 0.2s' }}></div>
+                                </div>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{ollamaDownloadProgress}%</span>
+                              </div>
+                            ) : isDownloaded ? (
+                              <button onClick={() => handleDeleteOllamaModel(installedModel)} style={{ background: 'transparent', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}>Delete</button>
+                            ) : (
+                              <button onClick={() => handleDownloadOllamaModel(model.name, model.sizeGB)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>Download</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div style={{ padding: '1rem', background: 'var(--card-bg-solid)', borderRadius: '0.5rem', border: '1px solid var(--card-border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <h5 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)' }}>Advanced Settings</h5>
