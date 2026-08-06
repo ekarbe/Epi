@@ -83,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_wav_metadata_empty_file() {
-        let docs_dir = dirs::document_dir().unwrap();
+        let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
         let library_dir = docs_dir.join("Epi Library");
         std::fs::create_dir_all(&library_dir).unwrap();
         
