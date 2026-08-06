@@ -37,7 +37,7 @@ Epi wasn't built in a day. It evolved from a simple need into a context-aware lo
 
 Want to see how it works without downloading the desktop app? Check out the interactive web preview (with simulated recording, transcription, and summarization):
 
-👉 **[Launch the Live Demo](https://eikekarbe.com/epi/)**
+👉 **[Launch the Live Demo](https://eikekarbe.com/Epi/#demo)**
 
 ---
 
