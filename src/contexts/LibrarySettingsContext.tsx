@@ -25,7 +25,7 @@ import {
 } from '../lib/api';
 import { transcribeAudio } from '../services/whisper';
 import { summarizeTranscript } from '../services/ollama';
-import { initDb, saveRecording, saveTranscript, saveSummary, getTranscriptForRecording, getSummaryForTranscript, getRawRecordingById, getLibraryRecordings, LibraryRecording, updateTranscript, updateSummary, ensureDefaultPrompts } from '../services/db';
+import { initDb, saveRecording, saveTranscript, saveSummary, getTranscriptForRecording, getSummaryForTranscript, getRawRecordingById, getLibraryRecordings, LibraryRecording, updateTranscript, updateSummary, ensureDefaultPrompts, getTags, getGlossary } from '../services/db';
 import { getBaseName } from '../utils/path';
 
 export const getTranscriptionProviderName = (provider: string) => {
@@ -61,6 +61,8 @@ export interface LibrarySettingsContextType {
   setOllamaModel: (model: string) => void;
   autoTranscribe: boolean;
   setAutoTranscribe: (v: boolean) => void;
+  namingSchema: string;
+  setNamingSchema: (v: string) => void;
   enableLogs: boolean;
   setEnableLogs: (v: boolean) => void;
   llmProvider: string;
@@ -100,6 +102,7 @@ export interface LibrarySettingsContextType {
   whisperXMaxSpeakers: number; setWhisperXMaxSpeakers: (v: number) => void;
   ollamaTemperature: number; setOllamaTemperature: (v: number) => void;
   ollamaNumCtx: number; setOllamaNumCtx: (v: number) => void;
+  ollamaNumPredict: number; setOllamaNumPredict: (v: number) => void;
   ollamaTopP: number; setOllamaTopP: (v: number) => void;
   ollamaTopK: number; setOllamaTopK: (v: number) => void;
   ollamaSystemPrompt: string; setOllamaSystemPrompt: (v: string) => void;
@@ -127,12 +130,18 @@ export interface LibrarySettingsContextType {
   isSummarizing: boolean;
   summarizingRecIds: number[];
   summaryError: string | null;
-  generateSummary: (promptTemplate: string) => Promise<void>;
+  generateSummary: (promptTemplate: string, relatedRecordingsContext?: string) => Promise<void>;
   updateActiveSummary: (text: string) => Promise<void>;
   addTranscribingId: (id: number) => void;
   removeTranscribingId: (id: number) => void;
   addSummarizingRecId: (id: number) => void;
   removeSummarizingRecId: (id: number) => void;
+  downloadingOllamaModel: string | null;
+  setDownloadingOllamaModel: (model: string | null) => void;
+  ollamaDownloadProgress: number;
+  setOllamaDownloadProgress: (progress: number) => void;
+  ollamaDownloadError: string | null;
+  setOllamaDownloadError: (error: string | null) => void;
 }
 
 
@@ -348,15 +357,21 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
 
   const [ollamaTemperature, setOllamaTemperature] = usePersistentState<number>('epi_ollama_temperature', 0.1);
   const [ollamaNumCtx, setOllamaNumCtx] = usePersistentState<number>('epi_ollama_num_ctx', 4096);
+  const [ollamaNumPredict, setOllamaNumPredict] = usePersistentState<number>('epi_ollama_num_predict', -1);
   const [ollamaTopP, setOllamaTopP] = usePersistentState<number>('epi_ollama_top_p', 0.9);
   const [ollamaTopK, setOllamaTopK] = usePersistentState<number>('epi_ollama_top_k', 10);
   const [ollamaSystemPrompt, setOllamaSystemPrompt] = usePersistentState<string>('epi_ollama_system_prompt', '');
+
+  const [downloadingOllamaModel, setDownloadingOllamaModel] = useState<string | null>(null);
+  const [ollamaDownloadProgress, setOllamaDownloadProgress] = useState<number>(0);
+  const [ollamaDownloadError, setOllamaDownloadError] = useState<string | null>(null);
 
   const [intelligenceContextDepth, setIntelligenceContextDepth] = usePersistentState<number>('epi_intelligence_context_depth', 5);
   const [intelligenceContextFormat, setIntelligenceContextFormat] = usePersistentState<string>('epi_intelligence_context_format', 'summaries');
 
   const [transcriptionProvider, setTranscriptionProvider] = usePersistentState<string>('epi_transcription_provider', 'local');
   const [autoTranscribe, setAutoTranscribe] = usePersistentState<boolean>('epi_auto_transcribe', false);
+  const [namingSchema, setNamingSchema] = usePersistentState<string>('epi_naming_schema', '{title}_{YYYY}{MM}{DD}_{counter}');
   const [enableLogs, setEnableLogs] = usePersistentState<boolean>('epi_enable_logs', true);
 
   const [apiKeys, setApiKeysState] = useState<Record<string, string>>({});
@@ -550,12 +565,20 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
         const baseName = getBaseName(filePath);
         logPath = await join(await documentDir(), 'Epi Library', 'Logs', `${baseName}_whisperx.log`);
       }
+      
+      let initialPrompt = whisperXPrompt;
+      const allGlossaryTerms = await getGlossary();
+      const glossaryTermString = allGlossaryTerms.map(t => t.term.trim()).join(', ');
+      
+      if (glossaryTermString !== '') {
+        initialPrompt = initialPrompt ? `${initialPrompt}, ${glossaryTermString}` : glossaryTermString;
+      }
 
       const result = await transcribeAudio(
         filePath, 
         activeModel, 
         forcedLanguage !== undefined ? forcedLanguage : whisperXLanguage, 
-        whisperXPrompt, 
+        initialPrompt, 
         finalTemp,
         transcriptionProvider,
         apiKeys[transcriptionProvider] || '',
@@ -625,7 +648,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const generateSummary = async (promptTemplate: string) => {
+  const generateSummary = async (promptTemplate: string, relatedRecordingsContext: string = '') => {
     if (!activeTranscript || !activeTranscriptId) return;
     const tId = activeTranscriptId;
     const transcriptText = activeTranscript;
@@ -644,22 +667,83 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
 
       let logPath: string | undefined;
       let recording: any;
+      let activeTags: string[] = [];
       if (recId) {
         recording = await getRawRecordingById(recId);
-        if (recording && enableLogs) {
-          const baseName = getBaseName(recording.filename);
-          logPath = await join(await documentDir(), 'Epi Library', 'Logs', `${baseName}_llm.log`);
+        if (recording) {
+          try {
+            activeTags = JSON.parse(recording.tags || '[]');
+          } catch (e) { }
+          if (enableLogs) {
+            const baseName = getBaseName(recording.filename);
+            logPath = await join(await documentDir(), 'Epi Library', 'Logs', `${baseName}_llm.log`);
+          }
         }
       }
 
-      const sum = await summarizeTranscript(transcriptText, promptTemplate, ollamaUrl, activeModel, llmProvider, apiKeys[llmProvider] || '', {
+      let meetingContextStr = '';
+      if (activeTags.length > 0) {
+        const allTags = await getTags();
+        const activeTagContexts = allTags.filter(t => activeTags.includes(t.name) && t.context.trim() !== '');
+        meetingContextStr = activeTagContexts.map(t => `${t.name}: ${t.context}`).join('\n');
+      }
+
+      const allGlossaryTerms = await getGlossary();
+      const glossaryWithMeanings = allGlossaryTerms.filter(t => t.meaning.trim() !== '');
+      const glossaryStr = glossaryWithMeanings.map(t => `${t.term}: ${t.meaning}`).join('\n');
+
+      let finalTranscript = transcriptText;
+      let finalSystemPrompt = ollamaSystemPrompt;
+
+      if (glossaryStr !== '' || meetingContextStr !== '') {
+        finalTranscript = `<BACKGROUND_CONTEXT>
+${glossaryStr ? `Glossary Terms:\n${glossaryStr}\n` : ''}${meetingContextStr ? `Meeting Context:\n${meetingContextStr}\n` : ''}</BACKGROUND_CONTEXT>
+
+<TRANSCRIPT>
+${transcriptText}
+</TRANSCRIPT>`;
+
+        const instruction = "CRITICAL INSTRUCTION: Use the <BACKGROUND_CONTEXT> ONLY to understand acronyms, spellings, and relationships. DO NOT include facts from the background context in your summary unless they were explicitly spoken about in the <TRANSCRIPT>.";
+        finalSystemPrompt = finalSystemPrompt ? `${finalSystemPrompt}\n\n${instruction}` : instruction;
+      }
+
+      // First pass: Summarize the current transcript using the user's template
+      let sum = await summarizeTranscript(finalTranscript, promptTemplate, ollamaUrl, activeModel, llmProvider, apiKeys[llmProvider] || '', {
         temperature: ollamaTemperature,
         num_ctx: ollamaNumCtx,
+        num_predict: ollamaNumPredict,
         top_p: ollamaTopP,
         top_k: ollamaTopK,
-        system: ollamaSystemPrompt,
+        system: finalSystemPrompt,
         logPath
       });
+
+      // Second pass (Reduce): If related context exists, perform a second integration pass
+      if (relatedRecordingsContext !== '') {
+        const secondPassTemplate = `You are an AI assistant. Here is a baseline analysis of a recent recording:
+
+--- BASE ANALYSIS ---
+{{transcript}}
+
+Here is context from previous related recordings:
+
+--- RELATED CONTEXT ---
+${relatedRecordingsContext}
+
+Please enrich and update the baseline analysis by integrating relevant facts, comparisons, or historical context from the related recordings. Do not remove any information from the baseline analysis; only add or compare. Output the fully updated analysis directly without meta-commentary.`;
+
+        // The "transcript" passed in the second pass is actually the first pass summary
+        sum = await summarizeTranscript(sum, secondPassTemplate, ollamaUrl, activeModel, llmProvider, apiKeys[llmProvider] || '', {
+          temperature: ollamaTemperature,
+          num_ctx: ollamaNumCtx, // Might need to increase this in reality, but sticking to user settings
+          num_predict: ollamaNumPredict,
+          top_p: ollamaTopP,
+          top_k: ollamaTopK,
+          system: "CRITICAL INSTRUCTION: Follow the user's prompt strictly to integrate the related recordings context with the base summary.",
+          logPath: logPath ? logPath.replace('.log', '_pass2.log') : undefined
+        });
+      }
+
       
       // Save to DB
       await saveSummary(tId, sum);
@@ -829,6 +913,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     whisperXPrompt, setWhisperXPrompt, whisperXTemperature, setWhisperXTemperature,
     loadRecordingIntoAnalysis, triggerTranscription,
     autoTranscribe, setAutoTranscribe, enableLogs, setEnableLogs,
+    namingSchema, setNamingSchema,
     pendingLanguagePrompt, setPendingLanguagePrompt,
     handleRetryTranscription, handleCancelLanguagePrompt, handleTranscription,
     openaiTranscriptionModel, setOpenaiTranscriptionModel,
@@ -846,6 +931,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     whisperXMaxSpeakers, setWhisperXMaxSpeakers,
     ollamaTemperature, setOllamaTemperature,
     ollamaNumCtx, setOllamaNumCtx,
+    ollamaNumPredict, setOllamaNumPredict,
     ollamaTopP, setOllamaTopP,
     ollamaTopK, setOllamaTopK,
     ollamaSystemPrompt, setOllamaSystemPrompt,
@@ -857,7 +943,9 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     updateActiveTranscript,
     activeSummary, isSummarizing, summarizingRecIds, summaryError, generateSummary,
     updateActiveSummary,
-    addTranscribingId, removeTranscribingId, addSummarizingRecId, removeSummarizingRecId
+    addTranscribingId, removeTranscribingId, addSummarizingRecId, removeSummarizingRecId,
+    downloadingOllamaModel, setDownloadingOllamaModel, ollamaDownloadProgress, setOllamaDownloadProgress,
+    ollamaDownloadError, setOllamaDownloadError
   }), [
     isDark, dbReady, dbError,
     activeTab, recordings, refreshLibrary, llmProvider, ollamaUrl, ollamaModel,
@@ -868,12 +956,12 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
     googleTranscriptionModel, openaiLlmModel, anthropicLlmModel, googleLlmModel,
     whisperXDevice, whisperXComputeType, whisperXBatchSize, whisperXDiarize,
     whisperXHfToken, whisperXMinSpeakers, whisperXMaxSpeakers,
-    ollamaTemperature, ollamaNumCtx, ollamaTopP, ollamaTopK, ollamaSystemPrompt,
+    ollamaTemperature, ollamaNumCtx, ollamaNumPredict, ollamaTopP, ollamaTopK, ollamaSystemPrompt,
     intelligenceContextDepth, intelligenceContextFormat,
     transcriptionProvider, apiKeys,
     activeRecordingId, activeTranscriptId, activeTranscript, isTranscribing, transcribingIds,
     transcriptionError, diarized, activeSummary, isSummarizing, summarizingRecIds,
-    summaryError
+    summaryError, namingSchema, downloadingOllamaModel, ollamaDownloadProgress, ollamaDownloadError
   ]);
 
   return (

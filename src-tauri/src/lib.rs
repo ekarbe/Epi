@@ -106,6 +106,39 @@ async fn get_storage_breakdown() -> Result<StorageBreakdown, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Retrieves the available disk space in bytes on the drive containing the Epi Library.
+/// Returns a fallback of the maximum available space across all drives if the specific drive cannot be resolved.
+#[tauri::command]
+async fn get_available_disk_space() -> Result<u64, String> {
+    tokio::task::spawn_blocking(|| {
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        
+        if let Some(docs) = dirs::document_dir() {
+            let mut best_disk: Option<&sysinfo::Disk> = None;
+            let mut longest_prefix = 0;
+            
+            for disk in disks.list() {
+                if docs.starts_with(disk.mount_point()) {
+                    let len = disk.mount_point().as_os_str().len();
+                    if len > longest_prefix {
+                        longest_prefix = len;
+                        best_disk = Some(disk);
+                    }
+                }
+            }
+            
+            if let Some(disk) = best_disk {
+                return Ok(disk.available_space());
+            }
+        }
+        
+        let max_space = disks.list().iter().map(|d| d.available_space()).max().unwrap_or(0);
+        Ok(max_space)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Renames a recording OGG file and all its associated transcription, summary, and ffmpeg log files on disk.
 /// This prevents race conditions and makes filesystem updates atomic.
 ///
@@ -389,6 +422,7 @@ pub fn run() {
             local_llm::generate_local_summary,
             get_library_size,
             get_storage_breakdown,
+            get_available_disk_space,
             rename_recording_files,
             delete_recording_files,
             delete_audio_file,

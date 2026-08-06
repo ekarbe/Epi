@@ -15,18 +15,29 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { BentoCard } from '../DashboardGrid';
-import { HardDrive, Cpu, Trash2, RefreshCw, Eye, EyeOff, Edit3 } from 'lucide-react';
+// import { BentoCard } from '../DashboardGrid';
+import { HardDrive, Cpu, Trash2, RefreshCw, Eye, EyeOff, Edit3, Mic, Settings } from 'lucide-react';
 import { useLibrarySettings } from '../../contexts/LibrarySettingsContext';
 import { useEffect, useState, useRef } from 'react';
 import { getStats, getRecordingsOlderThan30Days, deleteRecordingDb, getAutomations, createAutomation, deleteAutomation, Automation, getPrompts, createPrompt, updatePrompt, deletePrompt, PromptTemplate } from '../../services/db';
-import { getAvailableModels } from '../../services/ollama';
+import { getAvailableModels, pullModel, deleteModel } from '../../services/ollama';
 import { invoke } from '../../lib/api';
+import { GlossaryTagsSection } from './GlossaryTagsSection';
+import { CollapsibleCategory } from './CollapsibleCategory';
 
 /**
  * List of local WhisperX models supported by the application.
  */
 const WHISPER_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'];
+
+/**
+ * Recommended Ollama models and their estimated disk space (in GB).
+ */
+const RECOMMENDED_OLLAMA_MODELS = [
+  { name: 'llama3', sizeGB: 4.7 },
+  { name: 'phi3', sizeGB: 2.3 },
+  { name: 'mistral', sizeGB: 4.1 },
+];
 
 /**
  * Formats a byte size into a human-readable string.
@@ -283,14 +294,19 @@ export function EngineTab() {
     googleLlmModel, setGoogleLlmModel,
     ollamaTemperature, setOllamaTemperature,
     ollamaNumCtx, setOllamaNumCtx,
+    ollamaNumPredict, setOllamaNumPredict,
     ollamaTopP, setOllamaTopP,
     ollamaTopK, setOllamaTopK,
     ollamaSystemPrompt, setOllamaSystemPrompt,
     intelligenceContextDepth, setIntelligenceContextDepth,
     intelligenceContextFormat, setIntelligenceContextFormat,
     enableLogs, setEnableLogs,
+    namingSchema, setNamingSchema,
     activeRecordingId,
     loadRecordingIntoAnalysis,
+    downloadingOllamaModel, setDownloadingOllamaModel,
+    ollamaDownloadProgress, setOllamaDownloadProgress,
+    ollamaDownloadError, setOllamaDownloadError
   } = useLibrarySettings();
 
   const [stats, setStats] = useState({ recordingsCount: 0, transcriptsCount: 0 });
@@ -489,6 +505,55 @@ export function EngineTab() {
     }
   };
 
+  const handleDownloadOllamaModel = async (modelName: string, sizeGB: number) => {
+    setDownloadingOllamaModel(modelName);
+    setOllamaDownloadProgress(0);
+    setOllamaDownloadError(null);
+    try {
+      const freeSpaceBytes = await invoke<number>('get_available_disk_space');
+      const requiredBytes = (sizeGB + 2) * 1024 * 1024 * 1024;
+      if (freeSpaceBytes < requiredBytes) {
+        setAlertModal({ 
+          title: 'Disk Space Warning', 
+          message: `Not enough disk space. ${modelName} requires ${sizeGB}GB, plus a 2GB buffer, but you only have ${formatSize(freeSpaceBytes)} free.`, 
+          isError: true 
+        });
+        setDownloadingOllamaModel(null);
+        return;
+      }
+      
+      await pullModel(ollamaUrl, modelName, (percent) => {
+        setOllamaDownloadProgress(percent);
+      });
+      refreshModels();
+    } catch (err: any) {
+      console.error('Failed to pull Ollama model:', err);
+      setOllamaDownloadError(`Failed to download ${modelName}: Make sure Ollama is running.`);
+    } finally {
+      setDownloadingOllamaModel(null);
+    }
+  };
+
+  const handleDeleteOllamaModel = async (modelName: string) => {
+    setOllamaDownloadError(null);
+    setConfirmationModal({
+      title: "Delete Model",
+      message: `Are you sure you want to delete the model ${modelName}?`,
+      actionLabel: "Delete",
+      isDestructive: true,
+      onConfirm: async () => {
+        setConfirmationModal(null);
+        try {
+          await deleteModel(ollamaUrl, modelName);
+          refreshModels();
+        } catch (err: any) {
+          console.error("Failed to delete model:", err);
+          setOllamaDownloadError(`Failed to delete ${modelName}: ${err.message || String(err)}`);
+        }
+      }
+    });
+  };
+
   const refreshModels = () => {
     setIsFetchingModels(true);
     getAvailableModels(ollamaUrl).then(models => {
@@ -514,13 +579,15 @@ export function EngineTab() {
 
   return (
     <>
-      <BentoCard className="ai-engine-card" style={{ gridColumn: 'span 12' }}>
-        <div className="card-title">
-          <Cpu />
-          AI Engine Stack
-        </div>
+      <CollapsibleCategory 
+        className="system-prefs-card" 
+        title="System Preferences" 
+        icon={Settings} 
+        description="Configure app logging and global system preferences."
+        defaultOpen={true}
+      >
 
-        <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', background: 'var(--card-bg-solid)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--card-border)' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
             <input 
               type="checkbox" 
@@ -532,6 +599,44 @@ export function EngineTab() {
               <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Saves logs for FFmpeg, WhisperX, LLMs, and general app events to the Logs folder.</span>
             </div>
           </label>
+        </div>
+      </CollapsibleCategory>
+
+      <CollapsibleCategory 
+        className="recording-engine-card" 
+        title="Recording Engine" 
+        icon={Mic} 
+        description="Configure FFmpeg, naming schemas, and auto-transcription."
+        defaultOpen={true}
+      >
+
+        <div style={{ marginBottom: '2.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>Recording Preferences</h3>
+          </div>
+          
+          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+            <label className="form-label">Naming Schema for New Recordings</label>
+            <SettingInput 
+              className="config-input" 
+              value={namingSchema} 
+              onSave={setNamingSchema} 
+            />
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem', lineHeight: '1.4' }}>
+              Available variables: <code>{'{title}'}</code> (Provided title), <code>{'{DD}'}</code> (Day), <code>{'{MM}'}</code> (Month), <code>{'{YYYY}'}</code> (Year), <code>{'{HH}'}</code> (Hour), <code>{'{mm}'}</code> (Minute), <code>{'{counter}'}</code> (Daily counter).
+            </p>
+          </div>
+
+          <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+              <input 
+                type="checkbox" 
+                checked={autoTranscribe} 
+                onChange={e => setAutoTranscribe(e.target.checked)} 
+              />
+              Auto-Transcribe after recording
+            </label>
+          </div>
         </div>
 
         <div id="ffmpeg-section" style={{ marginBottom: '2.5rem' }}>
@@ -601,23 +706,21 @@ export function EngineTab() {
             </div>
           )}
         </div>
+      </CollapsibleCategory>
+
+      <CollapsibleCategory 
+        className="ai-engine-card" 
+        title="AI Engine Stack" 
+        icon={Cpu} 
+        description="Manage local and cloud models for transcription (Whisper) and summarization (Ollama)."
+        defaultOpen={true}
+      >
 
         <div style={{ marginBottom: '2.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0 }}>Transcription Engine</h3>
           </div>
           
-          <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-              <input 
-                type="checkbox" 
-                checked={autoTranscribe} 
-                onChange={e => setAutoTranscribe(e.target.checked)} 
-              />
-              Auto-Transcribe after recording
-            </label>
-          </div>
-
           <div className="segmented-control" style={{ marginBottom: '1.5rem' }}>
             {['local', 'openai', 'assembly', 'google'].map(p => (
               <button 
@@ -900,7 +1003,7 @@ export function EngineTab() {
                 min={0} 
                 max={20} 
               />
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>Number of related recordings to pull per tag. Set to 0 to disable.</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>Number of related recordings to pull per tag. <b>Note:</b> Using this feature triggers a second LLM pass, which increases processing time and API usage. Set to 0 to disable.</p>
             </div>
             
             <div className="form-group" style={{ flex: 1 }}>
@@ -965,6 +1068,44 @@ export function EngineTab() {
                     )}
                   </select>
                 </div>
+
+                <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                  <label className="form-label">Local Model Manager</label>
+                  {ollamaDownloadError && (
+                    <div style={{ color: 'var(--accent-red)', fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255, 69, 58, 0.1)', borderRadius: '4px', border: '1px solid rgba(255, 69, 58, 0.2)' }}>
+                      {ollamaDownloadError}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '0.5rem', padding: '0.5rem' }}>
+                    {RECOMMENDED_OLLAMA_MODELS.map((model) => {
+                      const installedModel = availableOllamaModels.find(m => m === model.name || m.startsWith(`${model.name}:`));
+                      const isDownloaded = !!installedModel;
+                      const isDownloading = downloadingOllamaModel === model.name;
+                      return (
+                        <div key={model.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem', background: 'transparent', borderRadius: '4px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '0.85rem', color: isDownloaded ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{model.name}</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>~{model.sizeGB} GB</span>
+                          </div>
+                          <div>
+                            {isDownloading ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ width: '60px', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${ollamaDownloadProgress}%`, height: '100%', background: 'var(--accent-blue)', transition: 'width 0.2s' }}></div>
+                                </div>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{ollamaDownloadProgress}%</span>
+                              </div>
+                            ) : isDownloaded ? (
+                              <button onClick={() => handleDeleteOllamaModel(installedModel)} style={{ background: 'transparent', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}>Delete</button>
+                            ) : (
+                              <button onClick={() => handleDownloadOllamaModel(model.name, model.sizeGB)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>Download</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div style={{ padding: '1rem', background: 'var(--card-bg-solid)', borderRadius: '0.5rem', border: '1px solid var(--card-border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <h5 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)' }}>Advanced Settings</h5>
                   
@@ -997,6 +1138,11 @@ export function EngineTab() {
                     <div className="form-group" style={{ flex: '1 1 45%' }}>
                       <label className="form-label">Context Window (num_ctx)</label>
                       <SettingNumberInput className="config-input" value={ollamaNumCtx} onSave={setOllamaNumCtx} min={512} max={131072} />
+                    </div>
+                    <div className="form-group" style={{ flex: '1 1 45%' }}>
+                      <label className="form-label">Max Output Tokens (num_predict)</label>
+                      <SettingNumberInput className="config-input" value={ollamaNumPredict} onSave={setOllamaNumPredict} min={-1} max={131072} />
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>-1 allows reasoning models to think fully.</p>
                     </div>
                   </div>
                 </div>
@@ -1039,7 +1185,7 @@ export function EngineTab() {
             )}
           </div>
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
       {confirmationModal && (
         <div className="modal-overlay">
@@ -1084,9 +1230,14 @@ export function EngineTab() {
         </div>
       )}
 
-      <BentoCard className="automation-card" style={{ gridColumn: '1 / -1' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.8rem', margin: 0 }}>Automation & Groups</h2>
+      <GlossaryTagsSection />
+      
+      <CollapsibleCategory 
+        className="automation-card" 
+        title="Automation & Groups"
+        description="Configure rules to automatically transcribe and summarize recordings on a schedule."
+        defaultOpen={true}
+        headerAction={
           <button 
             className="btn-primary" 
             style={{ width: 'auto', background: 'white', color: 'black' }}
@@ -1094,7 +1245,8 @@ export function EngineTab() {
           >
             {showAutomationForm ? 'Cancel' : 'New Rule'}
           </button>
-        </div>
+        }
+      >
 
         {showAutomationForm && (
           <div style={{ background: 'var(--card-bg-solid)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid var(--card-border)', marginBottom: '1.5rem' }}>
@@ -1147,11 +1299,14 @@ export function EngineTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No automation rules configured.</div>
           )}
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="prompts-card" style={{ gridColumn: '1 / -1' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.8rem', margin: 0 }}>Prompt Templates</h2>
+      <CollapsibleCategory 
+        className="prompts-card" 
+        title="Prompt Templates"
+        description="Manage custom prompt templates for LLM summarization."
+        defaultOpen={true}
+        headerAction={
           <button 
             className="btn-primary" 
             style={{ width: 'auto', background: 'white', color: 'black' }}
@@ -1164,7 +1319,8 @@ export function EngineTab() {
           >
             {showPromptForm ? 'Cancel' : 'New Template'}
           </button>
-        </div>
+        }
+      >
 
         {showPromptForm && (
           <div ref={promptFormRef} style={{ background: 'var(--card-bg-solid)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid var(--card-border)', marginBottom: '1.5rem' }}>
@@ -1221,13 +1377,15 @@ export function EngineTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No prompt templates configured.</div>
           )}
         </div>
-      </BentoCard>
+      </CollapsibleCategory>
 
-      <BentoCard className="storage-card" style={{ gridColumn: 'span 12' }}>
-        <div className="card-title">
-          <HardDrive style={{ color: 'var(--accent-amber)' }} />
-          Storage
-        </div>
+      <CollapsibleCategory 
+        className="storage-card" 
+        title="Storage Status" 
+        icon={HardDrive}
+        description="Review disk usage and clean up old recordings or logs."
+        defaultOpen={true}
+      >
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2rem 0' }}>
           <h2 style={{ fontSize: '2.5rem', margin: '0 0 0.5rem 0' }}>{formatSize(storageBreakdown.total)}</h2>
@@ -1309,7 +1467,7 @@ export function EngineTab() {
           <Trash2 size={18} style={{ color: 'var(--accent-amber)' }} />
           <span style={{ color: 'var(--text-primary)' }}>Clean All Logs</span>
         </button>
-      </BentoCard>
+      </CollapsibleCategory>
     </>
   );
 }

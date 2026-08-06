@@ -28,6 +28,7 @@ export interface OllamaAdvancedOptions {
   system?: string;
   temperature?: number;
   num_ctx?: number;
+  num_predict?: number;
   top_p?: number;
   top_k?: number;
   timeoutMs?: number;
@@ -106,6 +107,7 @@ export async function summarizeTranscript(
       system: advanced.system || '',
       temperature: advanced.temperature,
       numCtx: advanced.num_ctx,
+      numPredict: advanced.num_predict,
       topP: advanced.top_p,
       topK: advanced.top_k,
       timeoutMs: advanced.timeoutMs || 300000,
@@ -119,5 +121,81 @@ export async function summarizeTranscript(
     } else {
       throw new Error(`Summarization Error: ${errMessage}`);
     }
+  }
+}
+
+/**
+ * Pulls a model from the Ollama registry with streaming progress.
+ * 
+ * @param ollamaUrl Base URL of local Ollama (e.g. http://localhost:11434).
+ * @param modelName Name of the model to pull (e.g. 'llama3').
+ * @param onProgress Callback function for reporting download percentage (0-100).
+ */
+export async function pullModel(
+  ollamaUrl: string,
+  modelName: string,
+  onProgress: (percent: number) => void
+): Promise<void> {
+  const url = `${ollamaUrl}/api/pull`;
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: modelName })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to pull model: ${response.statusText}`);
+  }
+  
+  if (!response.body) {
+    throw new Error("ReadableStream not supported by response");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          const json = JSON.parse(line);
+          if (json.status === "success") {
+            onProgress(100);
+          } else if (json.total && json.completed) {
+            const percent = Math.floor((json.completed / json.total) * 100);
+            onProgress(percent);
+          }
+        } catch (e) {
+          console.warn("Failed to parse pull stream line:", line);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Deletes a model from the Ollama registry.
+ * 
+ * @param ollamaUrl Base URL of local Ollama (e.g. http://localhost:11434).
+ * @param modelName Name of the model to delete.
+ */
+export async function deleteModel(ollamaUrl: string, modelName: string): Promise<void> {
+  const url = `${ollamaUrl}/api/delete`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: modelName })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to delete model: ${response.statusText}`);
   }
 }

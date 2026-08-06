@@ -33,6 +33,8 @@ vi.mock('../../services/db', () => ({
   deleteRecordingDb: vi.fn(),
   deleteTranscriptAndSummaryDb: vi.fn(),
   updateRecordingTags: vi.fn(),
+  getTags: vi.fn().mockResolvedValue([]),
+  ensureTagExists: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../lib/api', () => ({
@@ -99,7 +101,7 @@ describe('LibraryTab', () => {
       expect(screen.getByText('test1')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search recordings or labels...');
+    const searchInput = screen.getByPlaceholderText(/Search/i);
     fireEvent.change(searchInput, { target: { value: 'other' } });
 
     await waitFor(() => {

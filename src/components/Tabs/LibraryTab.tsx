@@ -18,10 +18,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { BentoCard } from '../DashboardGrid';
 import { Library, Trash2, Edit2, Wand2, Search, X, Check } from 'lucide-react';
-import { LibraryRecording, updateRecording, deleteRecordingDb, deleteTranscriptAndSummaryDb, updateRecordingTags } from '../../services/db';
+import { LibraryRecording, updateRecording, deleteRecordingDb, deleteTranscriptAndSummaryDb, updateRecordingTags, ensureTagExists, getTags, Tag } from '../../services/db';
 import { useLibrarySettings } from '../../contexts/LibrarySettingsContext';
 import { invoke } from '../../lib/api';
 import { formatTimestamp } from '../../utils/date';
+import { TagAutocomplete } from '../TagAutocomplete';
 import { sanitizeFilename } from '../../utils/path';
 
 const ITEMS_PER_PAGE = 5;
@@ -60,9 +61,11 @@ export function LibraryTab() {
 
   // Pagination / Lazy rendering limit
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
 
   useEffect(() => {
     refreshLibrary().finally(() => setLoading(false));
+    getTags().then(setAllTags).catch(console.error);
   }, []);
 
   // Debounce search input changes by 200ms
@@ -198,6 +201,7 @@ export function LibraryTab() {
     if (currentTags.includes(trimmed)) return;
     
     try {
+      await ensureTagExists(trimmed);
       await updateRecordingTags(rec.id, [...currentTags, trimmed]);
       await refreshLibrary();
     } catch (err: any) {
@@ -239,7 +243,8 @@ export function LibraryTab() {
     return recordings.filter(
       (rec) =>
         rec.filename.toLowerCase().includes(q) ||
-        (rec.label && rec.label.toLowerCase().includes(q))
+        (rec.label && rec.label.toLowerCase().includes(q)) ||
+        (rec.tags && rec.tags.some(tag => tag.toLowerCase().includes(q)))
     );
   }, [recordings, debouncedSearchQuery]);
 
@@ -262,7 +267,7 @@ export function LibraryTab() {
             <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
             <input
               type="text"
-              placeholder="Search recordings or labels..."
+              placeholder="Search titles or tags..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               style={{
@@ -382,24 +387,11 @@ export function LibraryTab() {
                           <X size={12} style={{ cursor: 'pointer' }} onClick={() => handleRemoveTag(rec, tag)} />
                         </span>
                       ))}
-                      <input 
-                        type="text"
+                      <TagAutocomplete 
+                        availableTags={allTags.map(t => t.name)}
+                        onAdd={(tag) => handleAddTag(rec, tag)}
                         placeholder="+ tag"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleAddTag(rec, (e.target as HTMLInputElement).value);
-                            (e.target as HTMLInputElement).value = '';
-                          }
-                        }}
-                        style={{
-                          background: 'transparent',
-                          border: '1px dashed var(--card-border)',
-                          borderRadius: '0.5rem',
-                          padding: '0.2rem 0.5rem',
-                          fontSize: '0.75rem',
-                          width: '60px',
-                          color: 'var(--text-primary)'
-                        }}
+                        style={{ background: 'transparent', border: '1px dashed var(--text-secondary)', color: 'var(--text-primary)', borderRadius: '0.4rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem', width: '80px', outline: 'none' }}
                       />
                     </div>
                   </div>

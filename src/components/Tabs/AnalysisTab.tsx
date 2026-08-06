@@ -19,8 +19,9 @@ import { BentoCard } from '../DashboardGrid';
 import { Wand2 } from 'lucide-react';
 import { useLibrarySettings, getTranscriptionProviderName, getLlmProviderName } from '../../contexts/LibrarySettingsContext';
 import { useState, useEffect, useMemo } from 'react';
-import { getRawRecordingById, updateRecordingTags, getPrompts, PromptTemplate, getTranscriptForRecording, getSummaryForTranscript } from '../../services/db';
+import { getRawRecordingById, updateRecordingTags, getPrompts, PromptTemplate, getTranscriptForRecording, getSummaryForTranscript, ensureTagExists, getTags, Tag } from '../../services/db';
 import { documentDir, join, readFile, exists, stat, convertFileSrc, platform } from '../../lib/api';
+import { TagAutocomplete } from '../TagAutocomplete';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { X } from 'lucide-react';
 
@@ -58,6 +59,7 @@ export function AnalysisTab() {
 
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [promptTemplate, setPromptTemplate] = useState('Please provide an executive summary and action items for:\n\n{{transcript}}');
+  const [allTags, setAllTags] = useState<Tag[]>([]);
   
   useEffect(() => {
     getPrompts().then(p => {
@@ -66,6 +68,7 @@ export function AnalysisTab() {
         setPromptTemplate(p[0].templateText);
       }
     }).catch(console.error);
+    getTags().then(setAllTags).catch(console.error);
   }, []);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -77,18 +80,17 @@ export function AnalysisTab() {
   const [editedSummary, setEditedSummary] = useState('');
   const [isAudioMissing, setIsAudioMissing] = useState(false);
   const [isAudioTooLarge, setIsAudioTooLarge] = useState(false);
-  const [newTagInput, setNewTagInput] = useState('');
 
-  const handleAddTag = async () => {
+  const handleAddTag = async (tagToSave: string) => {
     if (!activeRecording) return;
-    const trimmed = newTagInput.trim();
+    const trimmed = tagToSave.trim();
     if (!trimmed) return;
     const currentTags = activeRecording.tags || [];
     if (currentTags.includes(trimmed)) return;
     
     try {
+      await ensureTagExists(trimmed);
       await updateRecordingTags(activeRecording.id, [...currentTags, trimmed]);
-      setNewTagInput('');
       refreshLibrary();
     } catch (err) {
       console.error(err);
@@ -489,23 +491,18 @@ export function AnalysisTab() {
                 }} />
               </span>
             ))}
-            <input 
-              type="text"
+            <TagAutocomplete 
+              availableTags={allTags.map(t => t.name)}
+              onAdd={handleAddTag}
               placeholder="+ Add Tag"
-              value={newTagInput}
-              onChange={e => setNewTagInput(e.target.value)}
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter') {
-                  await handleAddTag();
-                }
-              }}
+              className="config-input"
               style={{
                 background: 'transparent',
                 border: '1px dashed var(--card-border)',
                 borderRadius: '0.5rem',
                 padding: '0.2rem 0.5rem',
                 fontSize: '0.8rem',
-                width: '80px',
+                width: '100px',
                 color: 'var(--text-primary)'
               }}
             />
@@ -530,8 +527,8 @@ export function AnalysisTab() {
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', background: activeTranscript ? 'white' : 'var(--card-bg)', color: activeTranscript ? 'black' : 'var(--text-secondary)', opacity: activeTranscript ? 1 : 0.5, cursor: activeTranscript ? 'pointer' : 'not-allowed' }}
           onClick={async () => {
             const tags = activeRecording?.tags || [];
-            let fullPrompt = promptTemplate;
             
+            let relatedContextBlock = '';
             if (tags.length > 0 && intelligenceContextDepth > 0) {
               const relatedRecordingIds = new Set<number>();
               
@@ -547,7 +544,6 @@ export function AnalysisTab() {
               }
 
               if (relatedRecordingIds.size > 0) {
-                let contextBlock = `--- RELATED RECORDINGS CONTEXT ---\n`;
                 for (const recId of relatedRecordingIds) {
                   const rec = recordings.find(r => r.id === recId);
                   const t = await getTranscriptForRecording(recId);
@@ -557,20 +553,20 @@ export function AnalysisTab() {
                       const s = await getSummaryForTranscript(t.id);
                       if (s && s.summaryText) {
                         contentToAppend = s.summaryText;
-                      } else {
-                        contentToAppend = t.textContent; // fallback to transcript
                       }
                     } else {
-                      contentToAppend = t.textContent;
+                      // Only use a snippet of the transcript if format is 'transcripts' to avoid blowing up context
+                      contentToAppend = t.textContent.length > 2000 ? t.textContent.substring(0, 2000) + '... (truncated)' : t.textContent;
                     }
-                    contextBlock += `\n[Recording: ${rec?.label || rec?.filename}]\n${contentToAppend}\n`;
+                    
+                    if (contentToAppend) {
+                      relatedContextBlock += `[Recording: ${rec?.label || rec?.filename}]\n${contentToAppend}\n\n`;
+                    }
                   }
                 }
-                contextBlock += `--- END OF CONTEXT ---\n\n`;
-                fullPrompt = contextBlock + fullPrompt;
               }
             }
-            generateSummary(fullPrompt);
+            generateSummary(promptTemplate, relatedContextBlock);
           }}
           disabled={!activeTranscript || isSummarizing}
         >

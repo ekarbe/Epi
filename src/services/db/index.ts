@@ -23,3 +23,5 @@ export * from './summaries';
 export * from './stats';
 export * from './automations';
 export * from './prompts';
+export * from './tags';
+export * from './glossary';

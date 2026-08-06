@@ -1,6 +1,6 @@
 [package]
 name = "epi"
-version = "1.0.0"
+version = "1.1.0"
 description = "Epi - Local-first Meeting Intelligence"
 authors = ["Eike Christian Karbe"]
 edition = "2021"
@@ -44,6 +44,7 @@ tar = "0.4"
 flate2 = "1.0"
 log = "0.4.33"
 simplelog = "0.12.2"
+sysinfo = "0.30.12"
 
 [dev-dependencies]
 tempfile = "3.27.0"
