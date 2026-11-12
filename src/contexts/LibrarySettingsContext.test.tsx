@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { 
   getTranscriptionProviderName, 
@@ -147,5 +147,103 @@ describe('LibrarySettingsProvider full functions', () => {
     await act(async () => {
       screen.getByText('handleRetryTranscription').click();
     });
+  });
+});
+
+function SecretsTestComponent() {
+  const settings = useLibrarySettings();
+  return (
+    <div>
+      <span data-testid="openai-key">{settings.apiKeys.openai || ''}</span>
+      <span data-testid="hf-token">{settings.whisperXHfToken}</span>
+      <button onClick={() => settings.setApiKey('openai', '  sk-new  ')}>saveKey</button>
+      <button onClick={() => settings.setWhisperXHfToken('hf_new')}>saveToken</button>
+    </div>
+  );
+}
+
+describe('LibrarySettingsProvider secrets', () => {
+  it('loads API keys and the HF token from the OS keyring', async () => {
+    const { invoke } = await import('../lib/api');
+    const originalImpl = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === 'get_secret' && args.name === 'openai') return 'sk-stored' as any;
+      if (cmd === 'get_secret' && args.name === 'hf_token') return 'hf_stored' as any;
+      return originalImpl ? originalImpl(cmd, args) : undefined;
+    });
+
+    try {
+      render(
+        <LibrarySettingsProvider>
+          <SecretsTestComponent />
+        </LibrarySettingsProvider>
+      );
+
+      expect(await screen.findByText('sk-stored')).toBeInTheDocument();
+      expect(screen.getByTestId('hf-token').textContent).toBe('hf_stored');
+    } finally {
+      vi.mocked(invoke).mockImplementation(originalImpl as any);
+    }
+  });
+
+  it('saves secrets with set_secret and alerts when the keyring write fails', async () => {
+    const { invoke } = await import('../lib/api');
+    const originalImpl = vi.mocked(invoke).getMockImplementation();
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === 'set_secret' && args.name === 'hf_token') throw 'The system keyring is not available';
+      return originalImpl ? originalImpl(cmd, args) : undefined;
+    });
+
+    try {
+      render(
+        <LibrarySettingsProvider>
+          <SecretsTestComponent />
+        </LibrarySettingsProvider>
+      );
+
+      await act(async () => {
+        screen.getByText('saveKey').click();
+      });
+      expect(invoke).toHaveBeenCalledWith('set_secret', { name: 'openai', value: 'sk-new' });
+      expect(screen.getByTestId('openai-key').textContent).toBe('sk-new');
+      expect(alertSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        screen.getByText('saveToken').click();
+      });
+      expect(invoke).toHaveBeenCalledWith('set_secret', { name: 'hf_token', value: 'hf_new' });
+      expect(screen.getByTestId('hf-token').textContent).toBe('hf_new');
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('The system keyring is not available'));
+    } finally {
+      vi.mocked(invoke).mockImplementation(originalImpl as any);
+      alertSpy.mockRestore();
+    }
+  });
+
+  it('alerts when plaintext secrets cannot be migrated into the keyring', async () => {
+    const { invoke } = await import('../lib/api');
+    const originalImpl = vi.mocked(invoke).getMockImplementation();
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    localStorage.setItem('epi_whisperx_hf_token', 'hf_legacy');
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === 'get_secret') throw 'The system keyring is not available';
+      return originalImpl ? originalImpl(cmd, args) : undefined;
+    });
+
+    try {
+      render(
+        <LibrarySettingsProvider>
+          <SecretsTestComponent />
+        </LibrarySettingsProvider>
+      );
+
+      await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Hugging Face token: The system keyring is not available')));
+      expect(localStorage.getItem('epi_whisperx_hf_token')).toBe('hf_legacy');
+    } finally {
+      vi.mocked(invoke).mockImplementation(originalImpl as any);
+      alertSpy.mockRestore();
+      localStorage.removeItem('epi_whisperx_hf_token');
+    }
   });
 });

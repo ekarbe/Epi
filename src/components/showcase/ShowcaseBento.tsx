@@ -54,7 +54,7 @@ export function ShowcaseBento() {
           </div>
           <h3 style={{ marginTop: 0, fontSize: '1.5rem', marginBottom: '0.75rem' }}>Opt-In Cloud Fallbacks</h3>
           <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '1.05rem', lineHeight: 1.6 }}>
-            Prefer cloud processing? Epi seamlessly connects to OpenAI, Anthropic, Gemini, or AssemblyAI. Your API keys are encrypted at rest using Tauri Stronghold.
+            Prefer cloud processing? Epi seamlessly connects to OpenAI, Anthropic, Gemini, or AssemblyAI. Your API keys are kept in your operating system's keychain, never in plaintext files.
           </p>
         </TiltCard>
 

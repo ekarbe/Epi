@@ -181,9 +181,9 @@ npx tsc --noEmit`}
                 Epi hooks into system audio devices via Rust <code>cpal</code> and pipes stream data through a local TCP loopback to an isolated FFmpeg process. Audio is stored locally in compressed Opus (<code>.ogg</code>) format. No audio is ever transmitted over the network unless you explicitly select an opt-in Cloud Provider.
               </p>
 
-              <h4 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '1rem' }}>Encrypted Secrets Storage</h4>
+              <h4 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '1rem' }}>Secrets in the OS Keyring</h4>
               <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                When opt-in cloud providers are enabled, API keys are stored encrypted at rest using <strong>Tauri Stronghold</strong> (<code>tauri-plugin-stronghold</code>). Master keys are held securely in system keyring storage.
+                When opt-in cloud providers are enabled, API keys and the Hugging Face token are stored in the operating system's keyring: the <strong>macOS Keychain</strong>, the <strong>Windows Credential Manager</strong>, or the <strong>Linux Secret Service</strong> (GNOME Keyring, KWallet). They are never written to Epi's settings files or local storage, and if no keyring is available Epi refuses to save them rather than falling back to plaintext.
               </p>
             </div>
           )}

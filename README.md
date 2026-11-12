@@ -75,7 +75,7 @@ Want to see how it works without downloading the desktop app? Check out the inte
 
 ### ☁️ Opt-In Cloud Integrations
 - Optional cloud fallbacks for OpenAI (Whisper & GPT-4o), AssemblyAI, Google AI Studio (Gemini), and Anthropic (Claude).
-- API keys are encrypted at rest using **Tauri Stronghold** (`tauri-plugin-stronghold`).
+- API keys and the Hugging Face token are stored in the operating system's keyring (macOS Keychain, Windows Credential Manager, or the Linux Secret Service such as GNOME Keyring/KWallet), never in plaintext settings files. If no keyring is available, Epi refuses to save them instead of falling back to plaintext.
 
 ---
 
@@ -86,7 +86,7 @@ Epi is organized into four core workspace tabs:
 1. **Studio Tab**: Microphones and audio output device selection, record/stop button, real-time audio waveform visualization, and live microphone transcription.
 2. **Analysis Tab**: Complete transcript editor, speaker label inspection, summary generation, custom prompt template selection, and tag context injection.
 3. **Library Tab**: Filterable recording history with tag search, playback control, re-transcription actions, and granular multi-tier storage deletion options.
-4. **Engine Tab**: Central control center for Ollama model downloading/deletion, WhisperX setup & CPU-only toggle, built-in one-click FFmpeg manager, Global Glossary & Tags configuration, Naming Schemas, Automations, and Stronghold-encrypted Cloud API keys.
+4. **Engine Tab**: Central control center for Ollama model downloading/deletion, WhisperX setup & CPU-only toggle, built-in one-click FFmpeg manager, Global Glossary & Tags configuration, Naming Schemas, Automations, and Cloud API keys stored in the OS keyring.
 
 ---
 
@@ -100,7 +100,7 @@ Epi is organized into four core workspace tabs:
 | **Backend Core** | Rust 2021 Edition · Tokio · `sysinfo` | Async command dispatch, disk space check, process supervision |
 | **Audio Engine** | `cpal` · `ffmpeg` (TCP Loopback) | Device enumeration, audio streaming, Opus `.ogg` encoding |
 | **Local AI Engine** | WhisperX (Python 3.10+ venv) · Ollama Daemon | Offline speech recognition & LLM summarization |
-| **Storage & Security** | SQLite (`tauri-plugin-sql`) · Tauri Stronghold | Relational metadata storage & encrypted secret storage |
+| **Storage & Security** | SQLite (`tauri-plugin-sql`) · OS keyring (`keyring` crate) | Relational metadata storage & secret storage in the system keychain |
 
 ---
 
@@ -194,7 +194,7 @@ npm run tauri build
 | Summaries | `~/Documents/Epi Library/Summaries/` | Markdown (`.md`) LLM-generated summaries |
 | Application Logs | `~/Documents/Epi Library/Logs/` | Process logs (`app.log`, `_ffmpeg.log`) |
 | Database | `{AppData}/epi_meta.db` | SQLite metadata database (`tauri-plugin-sql`) |
-| Secrets & Settings | `{AppData}/settings.json` | Encrypted store (`tauri-plugin-stronghold`) |
+| API Keys & HF Token | OS keyring (service `com.ekarbe.epi`) | macOS Keychain, Windows Credential Manager, or Linux Secret Service |
 | WhisperX Venv | `{AppData}/whisperx_env/` | Isolated Python virtual environment |
 | Local FFmpeg | `{AppData}/ffmpeg/` | Managed standalone FFmpeg binary |
 

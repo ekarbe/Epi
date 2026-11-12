@@ -170,6 +170,31 @@ describe('EngineTab', () => {
     expect(setHfToken).toHaveBeenCalledWith('new_token');
   });
 
+  it('shows and saves cloud API keys per provider', async () => {
+    const setApiKey = vi.fn();
+    vi.mocked(useLibrarySettings).mockReturnValue({
+      ...defaultContext,
+      transcriptionProvider: 'assembly',
+      llmProvider: 'anthropic',
+      apiKeys: { assembly: 'aai_key', anthropic: 'sk-ant-key' },
+      setApiKey,
+    } as any);
+
+    render(<EngineTab />);
+
+    const transcriptionKey = await screen.findByDisplayValue('aai_key');
+    const llmKey = screen.getByDisplayValue('sk-ant-key');
+    expect(transcriptionKey.getAttribute('type')).toBe('password');
+
+    fireEvent.change(transcriptionKey, { target: { value: 'aai_new' } });
+    fireEvent.blur(transcriptionKey);
+    expect(setApiKey).toHaveBeenCalledWith('assembly', 'aai_new');
+
+    fireEvent.change(llmKey, { target: { value: 'sk-ant-new' } });
+    fireEvent.blur(llmKey);
+    expect(setApiKey).toHaveBeenCalledWith('anthropic', 'sk-ant-new');
+  });
+
   it('shows missing FFmpeg and install button', async () => {
     const installFfmpeg = vi.fn();
     vi.mocked(useLibrarySettings).mockReturnValue({

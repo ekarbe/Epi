@@ -26,6 +26,7 @@ mod whisperx;
 mod cloud_transcription;
 mod cloud_llm;
 mod local_llm;
+mod secrets;
 pub mod process_manager;
 mod utils;
 mod checksum;
@@ -283,7 +284,7 @@ async fn delete_transcript_files(filename: String) -> Result<(), String> {
 /// Sets up plugins, managed states, commands, and exit hooks.
 ///
 /// # Side Effects
-/// * Initializes default Tauri plugins (OS, Dialog, FS, SQL, Store, Stronghold).
+/// * Initializes default Tauri plugins (OS, Dialog, FS, SQL, Store).
 /// * Establishes app state management for audio and background child processes.
 /// * Registers Tauri IPC command handlers.
 /// * Spawns the main window and hooks into the `Exit` run event to clean up and terminate child processes (ffmpeg, Python venv).
@@ -311,10 +312,6 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_stronghold::Builder::new(|password| {
-            let hash = blake2b_simd::blake2b(password.as_bytes());
-            hash.as_bytes()[..32].to_vec()
-        }).build())
         .manage(audio::AudioState::default())
         .manage(whisperx::LiveTranscriptionState(std::sync::Mutex::new(None)))
         .manage(process_manager::ProcessRegistry::new())
@@ -350,7 +347,10 @@ pub fn run() {
             append_app_log,
             ffmpeg::install_ffmpeg,
             ffmpeg::uninstall_ffmpeg,
-            ffmpeg::check_ffmpeg_installation
+            ffmpeg::check_ffmpeg_installation,
+            secrets::get_secret,
+            secrets::set_secret,
+            secrets::delete_secret
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

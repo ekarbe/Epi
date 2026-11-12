@@ -20,6 +20,9 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 // Check if we are running inside the Tauri webview
 export const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
 
+/** In-memory stand-in for the OS keyring used by the web showcase. */
+const MOCK_SECRETS: Record<string, string> = {};
+
 /**
  * A wrapper around Tauri's invoke.
  * In the browser (GitHub Pages), this intercepts calls and returns simulated data with realistic delays.
@@ -121,6 +124,16 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       return `# Local Meeting Summary\n\n- **Status**: Generated locally using a simulated LLM.\n- **Note**: This is a static mock response for the local model.` as any;
     case 'check_ffmpeg_installation':
       return "global" as any;
+    // Secrets live only in memory in the web showcase.
+    case 'get_secret':
+      return (MOCK_SECRETS[args?.name] ?? null) as any;
+    case 'set_secret':
+      if (args?.value) MOCK_SECRETS[args.name] = args.value;
+      else delete MOCK_SECRETS[args?.name];
+      return undefined as any;
+    case 'delete_secret':
+      delete MOCK_SECRETS[args?.name];
+      return undefined as any;
     default:
       console.warn(`[Mock API] Unhandled command: ${cmd}`);
       return undefined as any;
@@ -540,6 +553,7 @@ export const loadStore = async (path: string) => {
   return {
     get: async <T>(key: string) => MOCK_STORE[key] as T,
     set: async (key: string, value: any) => { MOCK_STORE[key] = value; },
+    delete: async (key: string) => { const had = key in MOCK_STORE; delete MOCK_STORE[key]; return had; },
     save: async () => {}
   } as any;
 };
