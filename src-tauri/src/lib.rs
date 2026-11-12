@@ -28,6 +28,7 @@ mod cloud_llm;
 mod local_llm;
 pub mod process_manager;
 mod utils;
+mod checksum;
 pub mod ffmpeg;
 
 /// Calculates the total disk space (in bytes) occupied by files within the "Epi Library" directory.

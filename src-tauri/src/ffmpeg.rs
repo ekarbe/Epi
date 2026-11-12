@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Emitter};
 use std::io::Write;
+use crate::checksum::{verify_sha256, PinnedDownload};
 
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::PermissionsExt;
@@ -130,9 +131,79 @@ async fn download_with_progress(app: &AppHandle, mut response: reqwest::Response
     Ok(buffer)
 }
 
+/// Pinned Windows FFmpeg build: Gyan's FFmpeg 6.1.1 "full_build-shared" release
+/// (immutable GitHub release asset, same FFmpeg version as the macOS/Linux builds).
+/// The SHA-256 was computed from the published asset.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const FFMPEG_WINDOWS_DOWNLOAD: PinnedDownload = PinnedDownload {
+    url: "https://github.com/GyanD/codexffmpeg/releases/download/6.1.1/ffmpeg-6.1.1-full_build-shared.zip",
+    sha256: "50032b867c3ce74d682d2e9321e9d2a4b8bed37a09cba41b3980015658ffd498",
+};
+
+/// Verifies a downloaded FFmpeg asset against its pinned SHA-256, logging the outcome.
+fn verify_ffmpeg_download(app: &AppHandle, bytes: &[u8], download: &PinnedDownload) -> Result<(), String> {
+    verify_sha256(bytes, download.sha256, "FFmpeg download").map_err(|e| {
+        log::error!("{}", e);
+        let _ = app.emit("ffmpeg-install-log", &format!("ERR: {}", e));
+        e
+    })?;
+    log::info!("FFmpeg download SHA-256 verified ({})", download.sha256);
+    let _ = app.emit("ffmpeg-install-log", format!("SHA-256 checksum verified ({}).", download.sha256));
+    Ok(())
+}
+
+/// Extracts the `.exe` and `.dll` files found in a `bin/` directory of an FFmpeg
+/// zip archive flat into `out_dir`.
+///
+/// Entry names are sanitized with `enclosed_name()` (zip-slip protection) and only
+/// the final file name component is used for the output path, so no entry can be
+/// written outside `out_dir`. Returns the names of the extracted files.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn extract_ffmpeg_bin_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    out_dir: &std::path::Path,
+    mut on_extract: impl FnMut(&str),
+) -> Result<Vec<String>, String> {
+    let mut extracted = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
+        if file.is_dir() {
+            continue;
+        }
+        let Some(enclosed) = file.enclosed_name() else {
+            return Err(format!("Refusing to extract unsafe zip entry path: {}", file.name()));
+        };
+
+        let in_bin_dir = enclosed
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n == "bin")
+            .unwrap_or(false);
+        let Some(file_name) = enclosed.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        let lower = file_name.to_ascii_lowercase();
+        if !in_bin_dir || !(lower.ends_with(".exe") || lower.ends_with(".dll")) {
+            continue;
+        }
+
+        on_extract(&file_name);
+        let out_file_path = out_dir.join(&file_name);
+        let mut out_file = std::fs::File::create(&out_file_path)
+            .map_err(|e| format!("Failed to create {}: {}", file_name, e))?;
+        std::io::copy(&mut file, &mut out_file)
+            .map_err(|e| format!("Failed to write {}: {}", file_name, e))?;
+        extracted.push(file_name);
+    }
+    Ok(extracted)
+}
+
 #[cfg(target_os = "windows")]
 async fn install_ffmpeg_windows(app: &AppHandle, dest_path: &PathBuf) -> Result<(), String> {
-    let url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip";
+    let download = FFMPEG_WINDOWS_DOWNLOAD;
+    let url = download.url;
     
     let _ = app.emit("ffmpeg-install-log", format!("Fetching from: {}", url));
     
@@ -158,6 +229,7 @@ async fn install_ffmpeg_windows(app: &AppHandle, dest_path: &PathBuf) -> Result<
     }
     
     let bytes = download_with_progress(app, response).await?;
+    verify_ffmpeg_download(app, &bytes, &download)?;
         
     let _ = app.emit("ffmpeg-install-log", "Extracting zip archive...");
     
@@ -171,38 +243,64 @@ async fn install_ffmpeg_windows(app: &AppHandle, dest_path: &PathBuf) -> Result<
         })?;
         
     // Find ffmpeg.exe and DLLs inside the zip
-    let mut found = false;
-    let out_dir = dest_path.parent().unwrap();
+    let out_dir = dest_path
+        .parent()
+        .ok_or_else(|| "Invalid ffmpeg destination path".to_string())?;
+    let extracted = extract_ffmpeg_bin_files(&mut archive, out_dir, |name| {
+        let _ = app.emit("ffmpeg-install-log", format!("Extracting {}...", name));
+    })
+    .map_err(|e| {
+        let _ = app.emit("ffmpeg-install-log", &format!("ERR: {}", e));
+        e
+    })?;
     
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).unwrap();
-        let name = file.name().to_string();
-        
-        if name.contains("/bin/") && !name.ends_with('/') {
-            if name.ends_with(".exe") || name.ends_with(".dll") {
-                let file_name = std::path::Path::new(&name).file_name().unwrap();
-                let out_file_path = out_dir.join(file_name);
-                
-                let _ = app.emit("ffmpeg-install-log", format!("Extracting {}...", file_name.to_string_lossy()));
-                let mut out_file = std::fs::File::create(&out_file_path)
-                    .map_err(|e| format!("Failed to create {}: {}", file_name.to_string_lossy(), e))?;
-                std::io::copy(&mut file, &mut out_file)
-                    .map_err(|e| format!("Failed to write {}: {}", file_name.to_string_lossy(), e))?;
-                
-                if name.ends_with("ffmpeg.exe") {
-                    found = true;
-                }
-            }
-        }
-    }
-    
-    if !found {
+    if !extracted.iter().any(|n| n.eq_ignore_ascii_case("ffmpeg.exe")) {
         let msg = "Could not find bin/ffmpeg.exe in the downloaded zip archive.";
         let _ = app.emit("ffmpeg-install-log", &format!("ERR: {}", msg));
         return Err(msg.into());
     }
     
     Ok(())
+}
+
+/// Pinned static FFmpeg 6.1.1 binaries (eugeneware/ffmpeg-static release `b6.1.1`)
+/// per `(os, arch)` as reported by `std::env::consts`. The project publishes no
+/// checksum file, so the SHA-256 digests were computed from the release assets.
+const FFMPEG_UNIX_DOWNLOADS: &[(&str, &str, PinnedDownload)] = &[
+    ("macos", "x86_64", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-x64",
+        sha256: "ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894",
+    }),
+    ("macos", "aarch64", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64",
+        sha256: "a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584",
+    }),
+    ("linux", "x86_64", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-x64",
+        sha256: "e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99",
+    }),
+    ("linux", "x86", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-ia32",
+        sha256: "c6472eb993612db72ca50893a34137ba11173e60a1a4c028d4660a3f755d2490",
+    }),
+    ("linux", "arm", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-arm",
+        sha256: "0afba4a11110e6e402053e0fc14c33a7eb207d7a588688ae87dba471a0f06c71",
+    }),
+    ("linux", "aarch64", PinnedDownload {
+        url: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-arm64",
+        sha256: "6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce",
+    }),
+];
+
+/// Resolves the pinned static FFmpeg download (URL + SHA-256) for the given OS and architecture.
+pub fn ffmpeg_unix_download(os: &str, arch: &str) -> Result<PinnedDownload, String> {
+    let url = build_ffmpeg_unix_url(os, arch)?;
+    FFMPEG_UNIX_DOWNLOADS
+        .iter()
+        .find(|(_, _, dl)| dl.url == url)
+        .map(|(_, _, dl)| *dl)
+        .ok_or_else(|| format!("No pinned FFmpeg build available for {} {}", os, arch))
 }
 
 pub fn build_ffmpeg_unix_url(os: &str, arch: &str) -> Result<String, String> {
@@ -228,7 +326,8 @@ pub fn build_ffmpeg_unix_url(os: &str, arch: &str) -> Result<String, String> {
 
 #[cfg(target_family = "unix")]
 async fn install_ffmpeg_unix(app: &AppHandle, dest_path: &PathBuf) -> Result<(), String> {
-    let url = build_ffmpeg_unix_url(std::env::consts::OS, std::env::consts::ARCH)?;
+    let download = ffmpeg_unix_download(std::env::consts::OS, std::env::consts::ARCH)?;
+    let url = download.url;
     
     let _ = app.emit("ffmpeg-install-log", format!("Fetching from: {}", url));
     
@@ -238,7 +337,7 @@ async fn install_ffmpeg_unix(app: &AppHandle, dest_path: &PathBuf) -> Result<(),
         .build()
         .map_err(|e| e.to_string())?;
         
-    let response = client.get(&url)
+    let response = client.get(url)
         .send()
         .await
         .map_err(|e| {
@@ -254,6 +353,7 @@ async fn install_ffmpeg_unix(app: &AppHandle, dest_path: &PathBuf) -> Result<(),
     }
     
     let bytes = download_with_progress(app, response).await?;
+    verify_ffmpeg_download(app, &bytes, &download)?;
         
     let _ = app.emit("ffmpeg-install-log", "Writing binary to disk...");
     let mut file = std::fs::File::create(dest_path)
@@ -303,5 +403,64 @@ mod tests {
         
         let err_arch = build_ffmpeg_unix_url("linux", "mips");
         assert!(err_arch.is_err());
+    }
+
+    #[test]
+    fn test_every_ffmpeg_download_is_pinned() {
+        use crate::checksum::is_sha256_hex;
+        assert!(is_sha256_hex(FFMPEG_WINDOWS_DOWNLOAD.sha256));
+        assert!(!FFMPEG_WINDOWS_DOWNLOAD.url.contains("latest"));
+        for (os, arch, dl) in FFMPEG_UNIX_DOWNLOADS {
+            assert!(is_sha256_hex(dl.sha256), "{}/{}: invalid SHA-256 {}", os, arch, dl.sha256);
+            assert_eq!(build_ffmpeg_unix_url(os, arch).unwrap(), dl.url);
+            assert_eq!(ffmpeg_unix_download(os, arch).unwrap(), *dl);
+        }
+    }
+
+    #[test]
+    fn test_ffmpeg_unix_download_without_pinned_build() {
+        // URL can be built, but no such release asset exists (and thus no hash is pinned).
+        assert!(ffmpeg_unix_download("macos", "x86").is_err());
+        assert!(ffmpeg_unix_download("linux", "mips").is_err());
+    }
+
+    fn zip_with_entries(entries: &[(&str, &[u8])]) -> zip::ZipArchive<std::io::Cursor<Vec<u8>>> {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            writer.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        let cursor = writer.finish().unwrap();
+        zip::ZipArchive::new(std::io::Cursor::new(cursor.into_inner())).unwrap()
+    }
+
+    #[test]
+    fn test_extract_ffmpeg_bin_files_extracts_only_bin_executables() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut archive = zip_with_entries(&[
+            ("ffmpeg-6.1.1/bin/ffmpeg.exe", b"exe"),
+            ("ffmpeg-6.1.1/bin/avcodec-60.dll", b"dll"),
+            ("ffmpeg-6.1.1/doc/readme.txt", b"txt"),
+            ("ffmpeg-6.1.1/presets/bin.exe", b"no"),
+        ]);
+        let mut seen = Vec::new();
+        let extracted = extract_ffmpeg_bin_files(&mut archive, dir.path(), |n| seen.push(n.to_string())).unwrap();
+        assert_eq!(extracted, vec!["ffmpeg.exe", "avcodec-60.dll"]);
+        assert_eq!(seen, extracted);
+        assert_eq!(std::fs::read(dir.path().join("ffmpeg.exe")).unwrap(), b"exe");
+        assert!(!dir.path().join("readme.txt").exists());
+        assert!(!dir.path().join("bin.exe").exists());
+    }
+
+    #[test]
+    fn test_extract_ffmpeg_bin_files_rejects_zip_slip() {
+        let outer = tempfile::tempdir().unwrap();
+        let target = outer.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut archive = zip_with_entries(&[("../bin/evil.dll", b"evil")]);
+        let err = extract_ffmpeg_bin_files(&mut archive, &target, |_| {}).unwrap_err();
+        assert!(err.contains("unsafe zip entry"));
+        assert!(!outer.path().join("bin/evil.dll").exists());
+        assert!(!target.join("evil.dll").exists());
     }
 }
