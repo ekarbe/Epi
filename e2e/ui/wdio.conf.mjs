@@ -31,6 +31,17 @@
  *   cd e2e/ui && npm ci
  *   xvfb-run -a npm test              # without a display
  *
+ * Usage (Windows, elevated PowerShell; installs VB-CABLE, see the scripts):
+ *
+ *   cargo install tauri-driver --locked
+ *   .\e2e\ci\setup-audio-windows.ps1
+ *   $env:EPI_E2E_NATIVE_DRIVER = .\e2e\ci\setup-msedgedriver.ps1
+ *   $env:EPI_E2E_INPUT_DEVICE = 'CABLE Output'
+ *   cd e2e\ui; npm ci; npm test
+ *
+ * CI runs both in .github/workflows/e2e.yml (job ui-e2e). A failed test
+ * leaves a screenshot in <work dir>/screenshots.
+ *
  * Environment (all optional):
  *   EPI_E2E_SKIP_BUILD=1     use the existing src-tauri/target/debug/epi
  *                            instead of running `npm run tauri build -- --debug --no-bundle`
@@ -159,6 +170,24 @@ export const config = {
     tauriDriver = spawn(tauriDriverPath, args, { env, stdio: [null, process.stdout, process.stderr] });
     tauriDriver.once('error', (err) => console.error(`[e2e] Could not start tauri-driver (${tauriDriverPath}):`, err));
     await waitForPort(DRIVER_PORT, 15000);
+  },
+
+  /**
+   * Saves a screenshot of the app window after a failed test to
+   * `<work dir>/screenshots` (uploaded by the CI workflow). Best effort: an
+   * open native dialog or a crashed app makes the screenshot fail.
+   */
+  async afterTest(test, _context, { passed }) {
+    if (passed) return;
+    const dir = path.join(workDir, 'screenshots');
+    const file = path.join(dir, `${test.title.replace(/[^\w.-]+/g, '_')}.png`);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      await browser.saveScreenshot(file);
+      console.log(`[e2e] Screenshot of the failure: ${file}`);
+    } catch (err) {
+      console.log(`[e2e] Could not save a screenshot: ${err.message}`);
+    }
   },
 
   afterSession() {

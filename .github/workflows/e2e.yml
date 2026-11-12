@@ -36,6 +36,20 @@
 #   * All: the downloaded VB-CABLE pack and devcon.exe are pinned by SHA-256;
 #     a changed upstream file fails the setup step until the pin is updated.
 #
+# ui-e2e (ubuntu-latest, windows-latest)
+#   Runs the WebdriverIO suite in e2e/ui against the debug build of the app
+#   through tauri-driver, on the same virtual audio devices: records the tone
+#   from the Studio, checks the .ogg, renames and deletes the recording in the
+#   Library and checks the files on disk. Linux: WebKitWebDriver under Xvfb.
+#   Windows: msedgedriver matching the WebView2 Runtime, downloaded from
+#   Microsoft and checked for Microsoft's signature
+#   (e2e/ci/setup-msedgedriver.ps1). On failure the wdio logs, screenshots,
+#   recordings and setup logs are uploaded.
+#   Risks: the Windows audio risks above apply; WebView2 updates can briefly
+#   have no published driver of the exact version, in which case the newest
+#   driver of the same major version (or the runner's preinstalled one) is
+#   used.
+#
 # There is no UI E2E on macOS: WKWebView has no WebDriver for tauri-driver.
 
 name: E2E
@@ -189,6 +203,199 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-e2e-${{ matrix.os }}
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Drives the debug build of the app through tauri-driver + WebdriverIO
+  # (suite in e2e/ui): records the tone from the virtual input device in the
+  # Studio, checks the .ogg (length, level, dominant frequency), renames and
+  # deletes it in the Library and checks the files on disk. Linux uses
+  # WebKitWebDriver under Xvfb, Windows msedgedriver matching the WebView2
+  # Runtime (e2e/ci/setup-msedgedriver.ps1). macOS has no WebDriver for
+  # WKWebView, so it only runs backend-e2e.
+  ui-e2e:
+    name: ui-e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      EPI_E2E_TONE_HZ: "440"
+      # Keep recordings and the isolated home of a failed run for the upload.
+      EPI_E2E_KEEP: "1"
+      # The app is built in its own step below.
+      EPI_E2E_SKIP_BUILD: "1"
+      TAURI_DRIVER_VERSION: "2.1.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            e2e/ui/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
+            webkit2gtk-driver xvfb pulseaudio pulseaudio-utils libasound2-plugins ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Locate the Epi library, the work folders and tauri-driver
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            docs="$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')"
+            ext=.exe
+          else
+            docs="$HOME/Documents"
+            ext=
+          fi
+          # Windows: the real library (Known Folders cannot be redirected).
+          # Linux: the suite runs the app with an isolated home in the UI
+          # work folder, so this path is only used on Windows.
+          # Tone player and msedgedriver: EPI_E2E_WORK_DIR (setup scripts).
+          # wdio logs, screenshots and (Linux) the app's isolated home:
+          # EPI_E2E_UI_WORK_DIR.
+          {
+            echo "E2E_LIBRARY=$docs/Epi Library"
+            echo "EPI_E2E_WORK_DIR=$RUNNER_TEMP/epi-e2e-audio"
+            echo "EPI_E2E_UI_WORK_DIR=$RUNNER_TEMP/epi-e2e-ui"
+            echo "TAURI_DRIVER=$RUNNER_TEMP/tauri-driver/bin/tauri-driver$ext"
+          } >> "$GITHUB_ENV"
+
+      # tauri-driver gets its own install root so it can be cached on its own,
+      # independent of the cargo cache.
+      - name: Cache tauri-driver
+        id: tauri-driver-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tauri-driver
+          key: tauri-driver-${{ env.TAURI_DRIVER_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install tauri-driver
+        if: steps.tauri-driver-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install tauri-driver --version "$TAURI_DRIVER_VERSION" --locked --root "$RUNNER_TEMP/tauri-driver"
+
+      - name: Install msedgedriver (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File e2e\ci\setup-msedgedriver.ps1
+
+      # tauri-driver starts the native driver with only --port, so a small
+      # wrapper adds verbose logging; the log is part of the failure artifact.
+      - name: Log msedgedriver verbosely (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:EPI_E2E_WORK_DIR 'msedgedriver.log'
+          $wrapper = Join-Path $env:EPI_E2E_WORK_DIR 'msedgedriver-verbose.cmd'
+          Set-Content -Path $wrapper -Encoding ascii -Value "@`"$env:EPI_E2E_NATIVE_DRIVER`" %* --verbose `"--log-path=$log`""
+          "EPI_E2E_NATIVE_DRIVER=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-Content $wrapper
+
+      - name: Install npm dependencies
+        shell: bash
+        run: |
+          npm ci
+          npm --prefix e2e/ui ci
+
+      # Release-like debug build: the frontend is embedded (a plain cargo
+      # build would load the Vite dev server instead).
+      - name: Build the debug app
+        shell: bash
+        run: npm run tauri build -- --debug --no-bundle
+
+      - name: Set up virtual audio (Linux)
+        if: runner.os == 'Linux'
+        run: e2e/ci/setup-audio-linux.sh
+
+      - name: Set up virtual audio (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File e2e\ci\setup-audio-windows.ps1
+
+      # The suite records from "PulseAudio Sound Server", which the app maps
+      # to PulseAudio's default source (the virtual microphone).
+      - name: Run the UI E2E suite (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ./e2e/ui
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm test
+
+      - name: Run the UI E2E suite (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ./e2e/ui
+        env:
+          EPI_E2E_INPUT_DEVICE: CABLE Output
+        run: npm test
+
+      # Diagnostics for a failed Windows session: whether the app's WebView2
+      # opens a DevTools port when started directly with the switch that
+      # msedgedriver uses, and where DevToolsActivePort files end up.
+      - name: Probe WebView2 remote debugging (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $out = Join-Path $env:EPI_E2E_WORK_DIR 'webview2-probe.log'
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9223'
+          $app = Start-Process -FilePath 'src-tauri\target\debug\epi.exe' -PassThru
+          Start-Sleep -Seconds 20
+          & {
+            "app running: $(-not $app.HasExited)"
+            try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9223/json/version -TimeoutSec 5).Content } catch { "no DevTools on 9223: $_" }
+            'DevToolsActivePort files:'
+            Get-ChildItem -Path $env:LOCALAPPDATA, $env:TEMP, $env:RUNNER_TEMP -Recurse -Filter DevToolsActivePort -ErrorAction SilentlyContinue |
+              ForEach-Object { "$($_.FullName): $(Get-Content $_.FullName -Raw)" }
+            'WebView2 user data folders:'
+            Get-ChildItem -Path $env:LOCALAPPDATA -Recurse -Directory -Filter EBWebView -ErrorAction SilentlyContinue | ForEach-Object FullName
+            'epi / msedgewebview2 processes:'
+            Get-CimInstance Win32_Process -Filter "Name='epi.exe' or Name='msedgewebview2.exe'" | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }
+          } *>&1 | Tee-Object -FilePath $out
+          if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+
+      # See "Collect recordings and logs" above: one root for upload-artifact.
+      - name: Collect wdio logs, screenshots and recordings
+        if: failure()
+        shell: bash
+        run: |
+          # Git Bash on Windows: turn C:\... paths into /c/... so globs work.
+          p() { cygpath -u "$1" 2>/dev/null || printf '%s' "$1"; }
+          E2E_LIBRARY=$(p "$E2E_LIBRARY"); EPI_E2E_WORK_DIR=$(p "$EPI_E2E_WORK_DIR")
+          EPI_E2E_UI_WORK_DIR=$(p "${EPI_E2E_UI_WORK_DIR:-}")
+          out="$(p "$RUNNER_TEMP")/e2e-artifacts"
+          mkdir -p "$out/ui" "$out/library" "$out/audio"
+          for d in wdio-logs screenshots "home/Documents/Epi Library"; do
+            [ -e "$EPI_E2E_UI_WORK_DIR/$d" ] && cp -r "$EPI_E2E_UI_WORK_DIR/$d" "$out/ui/" || true
+          done
+          cp -r "$E2E_LIBRARY"/Recordings/epi-e2e-ui-* "$E2E_LIBRARY"/Logs/epi-e2e-ui-* "$E2E_LIBRARY"/Logs/app.log "$out/library/" 2>/dev/null || true
+          cp "$EPI_E2E_WORK_DIR"/*.log "$out/audio/" 2>/dev/null || true
+
+      - name: Upload wdio logs, screenshots and recordings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-${{ matrix.os }}
           path: ${{ runner.temp }}/e2e-artifacts
           if-no-files-found: warn
           retention-days: 7
