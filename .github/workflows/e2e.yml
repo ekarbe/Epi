@@ -1,0 +1,194 @@
+# End-to-end tests that record real sound.
+#
+# backend-e2e (ubuntu-latest, windows-latest, macos-latest)
+#   Runs the ignored Rust test src-tauri/tests/recording_e2e.rs against a
+#   virtual audio device that plays a 440 Hz tone. The test records through
+#   the same start/stop code the app uses (device -> ffmpeg -> Opus .ogg in
+#   ~/Documents/Epi Library/Recordings) and checks that the file exists, has
+#   the expected length and contains the tone (level, dominant frequency,
+#   share of the signal). Per platform it proves:
+#   * Linux:   recording through PulseAudio from the default input (a virtual
+#              microphone fed by a null sink) and from an output device's
+#              monitor (system audio), with ALSA routed to PulseAudio.
+#              Setup: e2e/ci/setup-audio-linux.sh
+#   * Windows: WASAPI capture through cpal and the TCP loopback into ffmpeg,
+#              from the VB-CABLE capture endpoint ("CABLE Output") and as
+#              WASAPI loopback of its playback endpoint ("CABLE Input", named
+#              "Speakers (VB-Audio Virtual Cable)" on recent Windows).
+#              Setup: e2e/ci/setup-audio-windows.ps1
+#   * macOS:   CoreAudio capture through cpal and the TCP loopback from
+#              BlackHole 2ch, including the microphone permission (TCC).
+#              Setup: e2e/ci/setup-audio-macos.sh
+#
+# Known risks (only Linux could be run before this workflow was added):
+#   * Windows: the runners have no audio hardware. The script installs the
+#     legacy-signed VB-CABLE driver from pack 43 (newer packs are only
+#     attestation-signed, which Windows Server rejects). If an image enables
+#     Secure Boot or stops accepting cross-signed drivers, the endpoints do
+#     not appear and the setup step fails. The tone is played by ffplay into
+#     the default playback device; if the runner session cannot play audio,
+#     the recording is silent and the test reports that.
+#   * macOS: microphone access relies on TCC rows of the runner image (and
+#     the rows the script adds, which need SIP disabled). Denied access
+#     yields silence, not an error, so a "silent" failure on macOS usually
+#     means TCC. macOS has no system-audio loopback in the app, so only the
+#     input path is tested.
+#   * All: the downloaded VB-CABLE pack and devcon.exe are pinned by SHA-256;
+#     a changed upstream file fails the setup step until the pin is updated.
+#
+# There is no UI E2E on macOS: WKWebView has no WebDriver for tauri-driver.
+
+name: E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-e2e:
+    name: backend-e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      EPI_E2E_TONE_HZ: "440"
+      # Keep the recording and the ffmpeg log so they can be uploaded on failure.
+      EPI_E2E_KEEP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The app runs `ffmpeg` from PATH unless it installed its own copy
+      # (see src-tauri/src/ffmpeg.rs); the test does the same.
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
+            pulseaudio pulseaudio-utils libasound2-plugins ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Check ffmpeg
+        shell: bash
+        run: |
+          # sed/grep read all output (head or grep -q could end ffmpeg with
+          # SIGPIPE, which fails the step under pipefail).
+          ffmpeg -hide_banner -version | sed -n 1p
+          ffmpeg -hide_banner -encoders | grep libopus >/dev/null || { echo "ffmpeg has no libopus encoder"; exit 1; }
+
+      - name: Locate the Epi library and the work folder
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            docs="$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')"
+          else
+            docs="$HOME/Documents"
+          fi
+          echo "E2E_LIBRARY=$docs/Epi Library" >> "$GITHUB_ENV"
+          # Where the setup scripts keep the tone player's PID and log. Set
+          # here because the runner context is not available in job-level env.
+          echo "EPI_E2E_WORK_DIR=$RUNNER_TEMP/epi-e2e-audio" >> "$GITHUB_ENV"
+
+      - name: Build the E2E test
+        shell: bash
+        working-directory: ./src-tauri
+        run: |
+          mkdir -p target
+          cargo test --test recording_e2e --no-run --message-format=json > target/e2e-build.json
+          exe="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "recording_e2e" and .executable != null) | .executable' target/e2e-build.json | tail -n 1)"
+          echo "Test executable: $exe"
+          echo "E2E_TEST_EXE=$exe" >> "$GITHUB_ENV"
+
+      - name: Set up virtual audio (Linux)
+        if: runner.os == 'Linux'
+        run: e2e/ci/setup-audio-linux.sh
+
+      - name: Set up virtual audio (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File e2e\ci\setup-audio-windows.ps1
+
+      # The test binary opens the input stream itself, so it is granted
+      # microphone access next to the runner agent and the shells.
+      - name: Set up virtual audio (macOS)
+        if: runner.os == 'macOS'
+        run: e2e/ci/setup-audio-macos.sh "$E2E_TEST_EXE"
+
+      - name: Record from the default input (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ./src-tauri
+        run: cargo test --test recording_e2e -- --ignored --nocapture
+
+      - name: Record system audio from the null sink monitor (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ./src-tauri
+        env:
+          EPI_E2E_OUTPUT_DEVICE: epi_null
+        run: cargo test --test recording_e2e -- --ignored --nocapture
+
+      - name: Record from CABLE Output (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ./src-tauri
+        env:
+          EPI_E2E_INPUT_DEVICE: CABLE Output
+        run: cargo test --test recording_e2e -- --ignored --nocapture
+
+      - name: Record system audio from the VB-CABLE playback loopback (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ./src-tauri
+        env:
+          # The playback endpoint is "CABLE Input (...)" or, on recent Windows,
+          # "Speakers (VB-Audio Virtual Cable)"; the test matches by substring
+          # among output devices only.
+          EPI_E2E_OUTPUT_DEVICE: VB-Audio Virtual Cable
+        run: cargo test --test recording_e2e -- --ignored --nocapture
+
+      - name: Record from BlackHole (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ./src-tauri
+        env:
+          EPI_E2E_INPUT_DEVICE: BlackHole
+        run: cargo test --test recording_e2e -- --ignored --nocapture
+
+      # upload-artifact needs all paths under one root, and on Windows the
+      # library (C:) and the work dir (D:) are on different drives, so the
+      # files are first copied into one folder.
+      - name: Collect recordings and logs
+        if: failure()
+        shell: bash
+        run: |
+          # Git Bash on Windows: turn C:\... paths into /c/... so globs work.
+          p() { cygpath -u "$1" 2>/dev/null || printf '%s' "$1"; }
+          E2E_LIBRARY=$(p "$E2E_LIBRARY"); EPI_E2E_WORK_DIR=$(p "$EPI_E2E_WORK_DIR")
+          EPI_E2E_UI_WORK_DIR=$(p "${EPI_E2E_UI_WORK_DIR:-}")
+          out="$(p "$RUNNER_TEMP")/e2e-artifacts"
+          mkdir -p "$out/library" "$out/audio"
+          cp -r "$E2E_LIBRARY"/Recordings/epi-e2e-* "$E2E_LIBRARY"/Logs/epi-e2e-* "$out/library/" 2>/dev/null || true
+          cp "$EPI_E2E_WORK_DIR"/*.log "$out/audio/" 2>/dev/null || true
+
+      - name: Upload recordings and logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-e2e-${{ matrix.os }}
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 7

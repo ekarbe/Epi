@@ -35,9 +35,11 @@
 //! ```
 //!
 //! Configuration (all optional):
-//! * `EPI_E2E_INPUT_DEVICE` - input device name to record from.
+//! * `EPI_E2E_INPUT_DEVICE` - input device name to record from. On Windows
+//!   and macOS a part of the name is enough (e.g. `CABLE Output`,
+//!   `BlackHole`); on Linux it is resolved like the app resolves names.
 //! * `EPI_E2E_OUTPUT_DEVICE` - output device to capture (system audio
-//!   loopback; Linux and Windows only).
+//!   loopback; Linux and Windows only), matched the same way.
 //!   Without either, the system default input device is recorded, exactly as
 //!   the app does with no device selected. With both, they are mixed.
 //! * `EPI_E2E_TONE_HZ` - expected tone frequency (default 440).
@@ -88,19 +90,64 @@ fn env_string(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// Resolves a configured device name to the full name the app would show.
+///
+/// On Windows and macOS the app matches devices by their exact `cpal` name,
+/// which includes details such as the manufacturer and device type (e.g.
+/// `CABLE Output (VB-Audio Virtual Cable) ...`) that differ between driver and
+/// OS versions. To keep the CI configuration stable, an exact match is used if
+/// there is one, otherwise the first device whose name contains `wanted`
+/// (case-insensitive). All devices are printed to make mismatches easy to see.
+///
+/// On Linux the name is passed through unchanged: the app resolves it to a
+/// PulseAudio source or sink itself (see `resolve_pulse_device`).
+#[cfg(not(target_os = "linux"))]
+fn resolve_device_name(wanted: &str, is_output: bool) -> String {
+    use cpal::traits::HostTrait;
+
+    let host = cpal::default_host();
+    let devices = if is_output {
+        host.output_devices()
+    } else {
+        host.input_devices()
+    };
+    let names: Vec<String> = devices
+        .map(|d| d.map(|d| d.to_string()).collect())
+        .unwrap_or_default();
+    let kind = if is_output { "output" } else { "input" };
+    eprintln!("[e2e] {} devices: {:?}", kind, names);
+
+    let lower = wanted.to_lowercase();
+    let resolved = names
+        .iter()
+        .find(|n| n.as_str() == wanted)
+        .or_else(|| names.iter().find(|n| n.to_lowercase().contains(&lower)))
+        .cloned()
+        .unwrap_or_else(|| panic!("no {} device matches {:?}", kind, wanted));
+    if resolved != wanted {
+        eprintln!("[e2e] {:?} resolved to {:?}", wanted, resolved);
+    }
+    resolved
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_device_name(wanted: &str, _is_output: bool) -> String {
+    wanted.to_string()
+}
+
 /// Builds the device selection from the environment (`None` = system default input).
 fn device_selection() -> Option<Vec<AudioDeviceSelection>> {
     let mut devices = Vec::new();
     if let Some(name) = env_string("EPI_E2E_INPUT_DEVICE") {
         devices.push(AudioDeviceSelection {
-            name,
+            name: resolve_device_name(&name, false),
             is_input: true,
             is_output: false,
         });
     }
     if let Some(name) = env_string("EPI_E2E_OUTPUT_DEVICE") {
         devices.push(AudioDeviceSelection {
-            name,
+            name: resolve_device_name(&name, true),
             is_input: false,
             is_output: true,
         });

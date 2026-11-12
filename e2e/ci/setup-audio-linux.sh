@@ -113,11 +113,25 @@ USER_DIRS="${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs"
 if ! grep -qs "XDG_DOCUMENTS_DIR" "$USER_DIRS"; then
     log "Defining XDG_DOCUMENTS_DIR in ${USER_DIRS}"
     mkdir -p "$(dirname "$USER_DIRS")"
+    # $HOME stays literal on purpose: user-dirs.dirs expands it itself.
+    # shellcheck disable=SC2016
     echo 'XDG_DOCUMENTS_DIR="$HOME/Documents"' >>"$USER_DIRS"
 fi
 mkdir -p "${HOME}/Documents"
 
-# 3. Start a per-user PulseAudio daemon without idle exit. --start returns once
+# 3. On GitHub's Ubuntu runners the runner user has a systemd user instance,
+#    and installing the pulseaudio package enables its socket-activated user
+#    units. A daemon started through that socket uses the default idle exit
+#    (it quits after ~20 s without clients and takes our modules with it), and
+#    the socket would block our own daemon. In CI only (never on a developer's
+#    desktop), stop and mask those units so the daemon below is the only one.
+if [ "${GITHUB_ACTIONS:-}" = "true" ] && command -v systemctl >/dev/null 2>&1; then
+    log "CI: stopping and masking systemd user units of PulseAudio (if any)"
+    systemctl --user stop pulseaudio.socket pulseaudio.service 2>/dev/null || true
+    systemctl --user mask pulseaudio.socket pulseaudio.service 2>/dev/null || true
+fi
+
+# 4. Start a per-user PulseAudio daemon without idle exit. --start returns once
 #    the daemon is ready (and is a no-op if it already runs). As root,
 #    PulseAudio prints a warning but still runs in per-user mode, which is
 #    what containers need; on GitHub runners it runs as the "runner" user.
@@ -139,7 +153,7 @@ for _ in $(seq 1 50); do
 done
 pactl info >/dev/null
 
-# 4. Virtual speaker: a null sink, made the default sink.
+# 5. Virtual speaker: a null sink, made the default sink.
 if [ -z "$(module_index "module-null-sink[[:space:]].*sink_name=${SINK}")" ]; then
     log "Creating null sink ${SINK}"
     pactl load-module module-null-sink sink_name="${SINK}" \
@@ -147,7 +161,7 @@ if [ -z "$(module_index "module-null-sink[[:space:]].*sink_name=${SINK}")" ]; th
 fi
 pactl set-default-sink "${SINK}"
 
-# 5. Virtual microphone: a remap of the null sink's monitor, made the default
+# 6. Virtual microphone: a remap of the null sink's monitor, made the default
 #    source. A plain monitor is usually not picked as "default input", and a
 #    remapped source behaves like a regular capture device.
 if [ -z "$(module_index "module-remap-source[[:space:]].*source_name=${MIC}")" ]; then
@@ -157,7 +171,7 @@ if [ -z "$(module_index "module-remap-source[[:space:]].*source_name=${MIC}")" ]
 fi
 pactl set-default-source "${MIC}"
 
-# 6. The test tone.
+# 7. The test tone.
 tone_on
 
 log "Sinks:"
