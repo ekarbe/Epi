@@ -479,23 +479,31 @@ export function EngineTab() {
         isDestructive: true,
         onConfirm: async () => {
           setConfirmationModal(null);
-          try {
-            for (const rec of oldRecs) {
-              // 1. Delete DB record
+          const failures: string[] = [];
+          for (const rec of oldRecs) {
+            try {
+              // 1. Delete files on disk; the DB record is kept if this fails
+              await invoke('delete_recording_files', { filename: rec.filename });
+
+              // 2. Delete DB record
               await deleteRecordingDb(rec.id);
               
               if (activeRecordingId === rec.id) {
                 await loadRecordingIntoAnalysis(null);
               }
-              
-              // 2. Delete files on disk using atomic Rust command
-              await invoke('delete_recording_files', { filename: rec.filename });
+            } catch (err: any) {
+              console.error(`Failed to clean up ${rec.filename}:`, err);
+              failures.push(`${rec.filename}: ${err?.message || String(err)}`);
             }
-            getStats().then(setStats).catch(console.error);
-            refreshLibrarySize();
-          } catch (err) {
-            console.error("Failed to run cleanup:", err);
-            setAlertModal({ title: "Cleanup Error", message: "Error running cleanup. Please check logs.", isError: true });
+          }
+          getStats().then(setStats).catch(console.error);
+          refreshLibrarySize();
+          if (failures.length > 0) {
+            setAlertModal({
+              title: "Cleanup Error",
+              message: `Failed to clean up ${failures.length} of ${oldRecs.length} recordings:\n${failures.join('\n')}`,
+              isError: true
+            });
           }
         }
       });

@@ -30,8 +30,6 @@ pub mod process_manager;
 mod utils;
 pub mod ffmpeg;
 
-use std::path::Path;
-
 /// Calculates the total disk space (in bytes) occupied by files within the "Epi Library" directory.
 ///
 /// This function runs asynchronously on a blocking thread pool to avoid blocking the main event thread.
@@ -139,108 +137,52 @@ async fn get_available_disk_space() -> Result<u64, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Resolves the absolute path of the `~/Documents/Epi Library` directory.
+fn library_dir() -> Result<std::path::PathBuf, String> {
+    let docs = dirs::document_dir()
+        .ok_or_else(|| "Could not find documents directory".to_string())?;
+    Ok(docs.join("Epi Library"))
+}
+
 /// Renames a recording OGG file and all its associated transcription, summary, and ffmpeg log files on disk.
-/// This prevents race conditions and makes filesystem updates atomic.
+///
+/// The rename is all-or-nothing on a best-effort basis, not truly atomic: all target paths are
+/// checked before anything is moved, and if an individual rename fails the files already
+/// renamed are moved back in reverse order. See [`utils::rename_recording_files_in`].
 ///
 /// # Arguments
 /// * `old_filename` - The current name of the recording OGG file.
 /// * `new_filename` - The target name of the recording OGG file.
 ///
 /// # Returns
-/// * `Result<(), String>` - Ok(()) on success, or an error description.
+/// * `Result<(), String>` - Ok(()) on success, or an error description of what failed
+///   (including any files that could not be restored during rollback).
 #[tauri::command]
 async fn rename_recording_files(old_filename: String, new_filename: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir()
-            .ok_or_else(|| "Could not find documents directory".to_string())?;
-        let library_dir = docs.join("Epi Library");
-        
-        let old_file = library_dir.join("Recordings").join(&old_filename);
-        let new_file = library_dir.join("Recordings").join(&new_filename);
-        
-        let old_file = crate::utils::validate_path_in_library(old_file)?;
-        let new_file = crate::utils::validate_path_in_library(new_file)?;
-        
-        if new_file.exists() {
-            return Err("A recording with this filename already exists.".to_string());
-        }
-        
-        if old_file.exists() {
-            std::fs::rename(&old_file, &new_file)
-                .map_err(|e| format!("Failed to rename OGG file: {}", e))?;
-        }
-        
-        let old_base = Path::new(&old_filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| "Invalid old filename".to_string())?;
-            
-        let new_base = Path::new(&new_filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| "Invalid new filename".to_string())?;
-            
-        let rename_subfile = |subdir: &str, old_suffix: &str, new_suffix: &str| {
-            let old_file = library_dir.join(subdir).join(format!("{}{}", old_base, old_suffix));
-            let new_file = library_dir.join(subdir).join(format!("{}{}", new_base, new_suffix));
-            if let (Ok(o), Ok(n)) = (crate::utils::validate_path_in_library(old_file), crate::utils::validate_path_in_library(new_file)) {
-                if o.exists() {
-                    let _ = std::fs::rename(o, n);
-                }
-            }
-        };
-        
-        rename_subfile("Transcriptions", ".json", ".json");
-        rename_subfile("Transcriptions", "_transcript.txt", "_transcript.txt");
-        rename_subfile("Summaries", "_summary.md", "_summary.md");
-        rename_subfile("Logs", "_ffmpeg.log", "_ffmpeg.log");
-        
-        Ok(())
+        crate::utils::rename_recording_files_in(&library_dir()?, &old_filename, &new_filename)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 /// Deletes all physical files associated with a recording on disk.
-/// Recursively validates file extensions to verify they match the specified stem name.
+///
+/// Missing files are ignored; every file is attempted even if one fails.
 ///
 /// # Arguments
 /// * `filename` - The name of the audio recording OGG file.
 ///
 /// # Returns
-/// * `Result<(), String>` - Returns Ok(()) on success, or an error description.
+/// * `Result<(), String>` - Returns Ok(()) on success, or the aggregated error descriptions of
+///   all files that could not be deleted.
 ///
 /// # Side Effects
 /// * Deletes .ogg from `Recordings`, .json/.txt from `Transcriptions`, .md from `Summaries`, and .log from `Logs`.
 #[tauri::command]
 async fn delete_recording_files(filename: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir()
-            .ok_or_else(|| "Could not find documents directory".to_string())?;
-        let library_dir = docs.join("Epi Library");
-        
-        let audio_path = library_dir.join("Recordings").join(&filename);
-        if let Ok(audio_file) = crate::utils::validate_path_in_library(audio_path) {
-            if audio_file.exists() {
-                let _ = std::fs::remove_file(audio_file);
-            }
-        }
-        
-        let base = Path::new(&filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| "Invalid filename".to_string())?;
-            
-        let delete_subfile = |subdir: &str, suffix: &str| {
-            crate::utils::delete_library_subfile(&library_dir, base, subdir, suffix);
-        };
-        
-        delete_subfile("Transcriptions", ".json");
-        delete_subfile("Transcriptions", "_transcript.txt");
-        delete_subfile("Summaries", "_summary.md");
-        delete_subfile("Logs", "_ffmpeg.log");
-        
-        Ok(())
+        crate::utils::delete_recording_files_in(&library_dir()?, &filename)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -253,23 +195,14 @@ async fn delete_recording_files(filename: String) -> Result<(), String> {
 /// * `filename` - The filename string of the target recording.
 ///
 /// # Returns
-/// * `Result<(), String>` - Ok(()) on success, or an error description.
+/// * `Result<(), String>` - Ok(()) on success or if the file did not exist, or an error description.
 ///
 /// # Side Effects
 /// * Removes the OGG file from the `Recordings` directory.
 #[tauri::command]
 async fn delete_audio_file(filename: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir()
-            .ok_or_else(|| "Could not find documents directory".to_string())?;
-        let library_dir = docs.join("Epi Library");
-        
-        let audio_path = library_dir.join("Recordings").join(&filename);
-        let audio_file = crate::utils::validate_path_in_library(audio_path)?;
-        if audio_file.exists() {
-            std::fs::remove_file(audio_file).map_err(|e| e.to_string())?;
-        }
-        Ok(())
+        crate::utils::delete_audio_file_in(&library_dir()?, &filename)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -331,32 +264,15 @@ async fn append_app_log(log: String) -> Result<(), String> {
 /// * `filename` - The base audio filename (which shares stem names with transcripts/logs).
 ///
 /// # Returns
-/// * `Result<(), String>` - Ok(()) on success, or an error description.
+/// * `Result<(), String>` - Ok(()) on success, or the aggregated error descriptions of all
+///   files that could not be deleted (missing files are ignored).
 ///
 /// # Side Effects
 /// * Removes JSON/TXT files from `Transcriptions`, Markdown from `Summaries`, and log files from `Logs`.
 #[tauri::command]
 async fn delete_transcript_files(filename: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir()
-            .ok_or_else(|| "Could not find documents directory".to_string())?;
-        let library_dir = docs.join("Epi Library");
-        
-        let base = Path::new(&filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| "Invalid filename".to_string())?;
-            
-        let delete_subfile = |subdir: &str, suffix: &str| {
-            crate::utils::delete_library_subfile(&library_dir, base, subdir, suffix);
-        };
-        
-        delete_subfile("Transcriptions", ".json");
-        delete_subfile("Transcriptions", "_transcript.txt");
-        delete_subfile("Summaries", "_summary.md");
-        delete_subfile("Logs", "_ffmpeg.log");
-        
-        Ok(())
+        crate::utils::delete_sidecar_files_in(&library_dir()?, &filename)
     })
     .await
     .map_err(|e| e.to_string())?

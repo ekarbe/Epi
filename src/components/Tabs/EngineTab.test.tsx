@@ -262,6 +262,51 @@ describe('EngineTab', () => {
     });
   });
 
+  it('keeps the DB record and reports an error when cleanup file deletion fails', async () => {
+    const { getRecordingsOlderThan30Days, deleteRecordingDb } = await import('../../services/db');
+    vi.mocked(getRecordingsOlderThan30Days).mockResolvedValue([
+      { id: 1, filename: 'locked.ogg' },
+      { id: 2, filename: 'ok.ogg' },
+    ] as any);
+    vi.mocked(deleteRecordingDb).mockClear();
+
+    const { invoke } = await import('../../lib/api');
+    const originalImpl = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: any) => {
+      if (cmd === 'delete_recording_files' && args?.filename === 'locked.ogg') {
+        return Promise.reject('Failed to delete locked.ogg: permission denied');
+      }
+      return originalImpl ? originalImpl(cmd, args) : Promise.resolve();
+    });
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    vi.mocked(useLibrarySettings).mockReturnValue(defaultContext as any);
+    render(<EngineTab />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Clean Up Old Audios/i })).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Clean Up Old Audios/i }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Delete Recordings')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Delete Recordings'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Cleanup Error')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/permission denied/)).toBeInTheDocument();
+    expect(deleteRecordingDb).not.toHaveBeenCalledWith(1);
+    expect(deleteRecordingDb).toHaveBeenCalledWith(2);
+
+    vi.mocked(invoke).mockImplementation(originalImpl as any);
+    consoleErrorSpy.mockRestore();
+  });
+
   it('can open clean all logs modal and confirm with error', async () => {
     vi.mocked(useLibrarySettings).mockReturnValue(defaultContext as any);
     
