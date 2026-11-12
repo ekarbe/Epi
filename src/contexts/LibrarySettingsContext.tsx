@@ -21,7 +21,7 @@ import {
   invoke, 
   listen, 
   documentDir, join, BaseDirectory,
-  writeTextFile, exists, readDir
+  writeLibraryTextFile, exists, readDir
 } from '../lib/api';
 import { loadSecrets, setSecret, HF_TOKEN_SECRET } from '../lib/secrets';
 import { transcribeAudio } from '../services/whisper';
@@ -616,7 +616,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
           const baseName = getBaseName(recording.filename);
           
           // Save the .txt transcript
-          await writeTextFile(`Epi Library/Transcriptions/${baseName}_transcript.txt`, result, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Transcriptions', `${baseName}_transcript.txt`, result);
           
           // If cloud provider, also save a basic .json representation so the user has it
           if (transcriptionProvider !== 'local') {
@@ -626,7 +626,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
               ],
               word_segments: []
             };
-            await writeTextFile(`Epi Library/Transcriptions/${baseName}.json`, JSON.stringify(jsonRepresentation, null, 2), { baseDir: BaseDirectory.Document });
+            await writeLibraryTextFile('Transcriptions', `${baseName}.json`, JSON.stringify(jsonRepresentation, null, 2));
           }
         }
       } catch (err) {
@@ -762,7 +762,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         if (recording) {
           const baseName = getBaseName(recording.filename);
           
-          await writeTextFile(`Epi Library/Summaries/${baseName}_summary.md`, sum, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Summaries', `${baseName}_summary.md`, sum);
         }
       } catch (err: any) {
         console.error("Failed to write summary file", err);
@@ -874,7 +874,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         const recording = await getRawRecordingById(activeRecordingId);
         if (recording) {
           const baseName = getBaseName(recording.filename);
-          await writeTextFile(`Epi Library/Transcriptions/${baseName}_transcript.txt`, text, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Transcriptions', `${baseName}_transcript.txt`, text);
         }
       }
     } catch (err: any) {
@@ -899,7 +899,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         const recording = await getRawRecordingById(activeRecordingId);
         if (recording) {
           const baseName = getBaseName(recording.filename);
-          await writeTextFile(`Epi Library/Summaries/${baseName}_summary.md`, text, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Summaries', `${baseName}_summary.md`, text);
         }
       }
     } catch (err: any) {

@@ -281,11 +281,37 @@ async fn delete_transcript_files(filename: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Writes a transcript or summary text file into the Epi Library.
+///
+/// This replaces direct filesystem writes from the webview, so the webview needs no
+/// write access to the library. Only `Transcriptions` (`*_transcript.txt`, `*.json`) and
+/// `Summaries` (`*_summary.md`) are writable. See [`utils::write_library_text_file_in`].
+///
+/// # Arguments
+/// * `subdir` - The target subdirectory (`Transcriptions` or `Summaries`).
+/// * `file_name` - The target file name, e.g. `meeting_transcript.txt`.
+/// * `contents` - The text to write.
+///
+/// # Returns
+/// * `Result<(), String>` - Ok(()) on success, or an error description if the target is not
+///   allowed or the write failed.
+///
+/// # Side Effects
+/// * Creates the subdirectory if needed and creates or overwrites the file.
+#[tauri::command]
+async fn write_library_text_file(subdir: String, file_name: String, contents: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        crate::utils::write_library_text_file_in(&library_dir()?, &subdir, &file_name, &contents)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The main entry point for the Tauri application.
 /// Sets up plugins, managed states, commands, and exit hooks.
 ///
 /// # Side Effects
-/// * Initializes default Tauri plugins (OS, Dialog, FS, Store).
+/// * Initializes the Tauri plugins used by the frontend (OS, FS, Store).
 /// * Registers the metadata database (`epi_meta.db` in the app config directory) as managed state.
 /// * Establishes app state management for audio and background child processes.
 /// * Registers Tauri IPC command handlers.
@@ -310,7 +336,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(audio::AudioState::default())
@@ -351,6 +376,7 @@ pub fn run() {
             delete_recording_files,
             delete_audio_file,
             delete_transcript_files,
+            write_library_text_file,
             delete_all_logs,
             append_app_log,
             ffmpeg::install_ffmpeg,

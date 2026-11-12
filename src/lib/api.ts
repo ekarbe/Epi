@@ -108,6 +108,7 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
     case 'delete_transcript_files':
     case 'rename_recording_files':
     case 'delete_all_logs':
+    case 'write_library_text_file':
     case 'install_ffmpeg':
     case 'uninstall_ffmpeg':
     case 'uninstall_whisperx':
@@ -168,7 +169,19 @@ const MOCK_FILES = new Set([
   'dummy_recording_12345.ogg'
 ]);
 
-export const writeTextFile = isTauri ? TauriFs.writeTextFile : async (_path: string, _content: string, _options?: any) => {};
+/** Library subdirectories the backend lets the frontend write text files into. */
+export type WritableLibrarySubdir = 'Transcriptions' | 'Summaries';
+
+/**
+ * Writes a transcript or summary text file into the Epi Library via the Rust backend,
+ * creating or overwriting it. The webview itself has no filesystem write permission.
+ *
+ * @param subdir - `Transcriptions` (for `*_transcript.txt` / `*.json`) or `Summaries` (for `*_summary.md`).
+ * @param fileName - A plain file name without path separators, e.g. `meeting_transcript.txt`.
+ * @param contents - The text to write.
+ */
+export const writeLibraryTextFile = (subdir: WritableLibrarySubdir, fileName: string, contents: string): Promise<void> =>
+  invoke<void>('write_library_text_file', { subdir, fileName, contents });
 export const exists = isTauri ? TauriFs.exists : async (path: string, _options?: any) => {
   if (!path) return false;
   if (path === 'Epi Library' || path.includes('Epi Library/Recordings') && path.endsWith('Recordings')) return true;

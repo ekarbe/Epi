@@ -37,7 +37,7 @@ vi.mock('../lib/api', () => ({
   documentDir: vi.fn().mockResolvedValue('/docs'),
   join: vi.fn((...args) => args.join('/')),
   BaseDirectory: { Document: 1 },
-  writeTextFile: vi.fn(),
+  writeLibraryTextFile: vi.fn(),
   exists: vi.fn().mockResolvedValue(false),
   readDir: vi.fn().mockResolvedValue([]),
   loadStore: vi.fn().mockResolvedValue({ get: vi.fn().mockResolvedValue(null), set: vi.fn(), save: vi.fn() })

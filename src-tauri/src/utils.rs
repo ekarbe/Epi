@@ -298,6 +298,52 @@ where
     Ok(())
 }
 
+/// The library subdirectories the frontend may write text files into, with the file
+/// suffixes allowed in each, as `(subdirectory, allowed suffixes)` pairs.
+pub const WRITABLE_TEXT_FILES: &[(&str, &[&str])] = &[
+    ("Transcriptions", &["_transcript.txt", ".json"]),
+    ("Summaries", &["_summary.md"]),
+];
+
+/// Writes a transcript or summary text file into the library, replacing any existing file.
+///
+/// Only the subdirectories and file suffixes listed in [`WRITABLE_TEXT_FILES`] are accepted,
+/// and `file_name` must be a plain file name (no path separators or traversal). The
+/// subdirectory is created if it does not exist yet.
+///
+/// # Arguments
+/// * `library_dir` - The path to the Epi Library directory.
+/// * `subdir` - The target subdirectory (`Transcriptions` or `Summaries`).
+/// * `file_name` - The target file name, e.g. `meeting_transcript.txt`.
+/// * `contents` - The UTF-8 text to write.
+///
+/// # Returns
+/// * `Result<(), String>` - Ok(()) on success, or an error description if validation or
+///   the write failed.
+///
+/// # Side Effects
+/// * Creates `library_dir/subdir` if needed and writes `file_name` inside it.
+pub fn write_library_text_file_in(library_dir: &Path, subdir: &str, file_name: &str, contents: &str) -> Result<(), String> {
+    let suffixes = WRITABLE_TEXT_FILES
+        .iter()
+        .find(|(dir, _)| *dir == subdir)
+        .map(|(_, suffixes)| *suffixes)
+        .ok_or_else(|| format!("Writing to library subdirectory '{}' is not allowed", subdir))?;
+
+    let is_plain_name = Path::new(file_name).file_name().and_then(|n| n.to_str()) == Some(file_name);
+    if !is_plain_name || file_name.contains(['/', '\\']) {
+        return Err(format!("Invalid file name: {}", file_name));
+    }
+    if !suffixes.iter().any(|s| file_name.len() > s.len() && file_name.ends_with(s)) {
+        return Err(format!("File name '{}' is not allowed in {}", file_name, subdir));
+    }
+
+    let dir = validate_path_in_dir(library_dir.join(subdir), library_dir)?;
+    let target = validate_path_in_dir(dir.join(file_name), library_dir)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {}", dir.display(), e))?;
+    std::fs::write(&target, contents).map_err(|e| format!("Failed to write {}: {}", target.display(), e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +546,49 @@ mod tests {
         for (subdir, suffix) in RECORDING_SIDECAR_FILES {
             assert!(!lib.path().join(subdir).join(format!("rec{}", suffix)).exists());
         }
+    }
+
+    #[test]
+    fn test_write_library_text_file_creates_and_overwrites() {
+        // Start from an empty library: the subdirectory must be created on demand.
+        let lib = tempfile::tempdir().unwrap();
+
+        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "first").unwrap();
+        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "second").unwrap();
+        write_library_text_file_in(lib.path(), "Transcriptions", "rec.json", "{}").unwrap();
+        write_library_text_file_in(lib.path(), "Summaries", "rec_summary.md", "# Summary").unwrap();
+
+        let read = |p: &str| std::fs::read_to_string(lib.path().join(p)).unwrap();
+        assert_eq!(read("Transcriptions/rec_transcript.txt"), "second");
+        assert_eq!(read("Transcriptions/rec.json"), "{}");
+        assert_eq!(read("Summaries/rec_summary.md"), "# Summary");
+    }
+
+    #[test]
+    fn test_write_library_text_file_rejects_disallowed_targets() {
+        let lib = temp_library();
+        let rejected = [
+            ("Recordings", "rec.ogg"),
+            ("Logs", "rec_summary.md"),
+            ("..", "rec_summary.md"),
+            ("Summaries", "../rec_summary.md"),
+            ("Summaries", "sub/rec_summary.md"),
+            ("Summaries", "sub\\rec_summary.md"),
+            ("Summaries", "rec_summary.md.exe"),
+            ("Summaries", "rec_transcript.txt"),
+            ("Summaries", "_summary.md"),
+            ("Transcriptions", ".."),
+            ("Transcriptions", ""),
+        ];
+        for (subdir, name) in rejected {
+            assert!(
+                write_library_text_file_in(lib.path(), subdir, name, "x").is_err(),
+                "should reject {}/{}",
+                subdir,
+                name
+            );
+        }
+        assert!(!lib.path().join("Recordings/rec.ogg").exists());
+        assert!(!lib.path().join("rec_summary.md").exists());
     }
 }

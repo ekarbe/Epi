@@ -26,8 +26,7 @@ symphonia = { version = "0.5.4", features = ["all"] }
 cpal = "0.18.1"
 bytemuck = "1.15.0"
 chrono = "0.4.45"
-tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
-tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
 tauri-plugin-os = "2.3.2"
 dirs = "5.0.1"
 walkdir = "2.5.0"
