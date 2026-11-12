@@ -244,6 +244,15 @@ fn get_ffmpeg_format(format: cpal::SampleFormat) -> &'static str {
     }
 }
 
+/// Copies a slice of interleaved samples into a byte buffer in native byte
+/// order, ready to be streamed to ffmpeg as raw PCM.
+///
+/// Uses `bytemuck::cast_slice`, so the conversion is checked at compile time
+/// (the sample type must be `Pod`) instead of relying on an unsafe pointer cast.
+fn samples_to_bytes<T: bytemuck::Pod>(data: &[T]) -> Vec<u8> {
+    bytemuck::cast_slice::<T, u8>(data).to_vec()
+}
+
 fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -258,13 +267,7 @@ fn build_stream(
                 .build_input_stream(
                     *config,
                     move |data: &[$type], _: &cpal::InputCallbackInfo| {
-                        let bytes = unsafe {
-                            std::slice::from_raw_parts(
-                                data.as_ptr() as *const u8,
-                                data.len() * std::mem::size_of::<$type>(),
-                            )
-                        };
-                        let _ = tx.send(bytes.to_vec());
+                        let _ = tx.send(samples_to_bytes(data));
                     },
                     err_fn,
                     None,
@@ -568,6 +571,32 @@ mod tests {
     
     use std::io::Read;
     
+    #[test]
+    fn test_samples_to_bytes_native_endian() {
+        let f: [f32; 2] = [1.0, -0.5];
+        let mut expected = Vec::new();
+        for v in f {
+            expected.extend_from_slice(&v.to_ne_bytes());
+        }
+        assert_eq!(samples_to_bytes(&f), expected);
+
+        let i: [i16; 3] = [0, i16::MAX, i16::MIN];
+        let mut expected = Vec::new();
+        for v in i {
+            expected.extend_from_slice(&v.to_ne_bytes());
+        }
+        assert_eq!(samples_to_bytes(&i), expected);
+
+        let u: [u8; 2] = [0, 255];
+        assert_eq!(samples_to_bytes(&u), vec![0u8, 255]);
+
+        let d: [f64; 1] = [0.25];
+        assert_eq!(samples_to_bytes(&d), 0.25f64.to_ne_bytes().to_vec());
+
+        let empty: [i32; 0] = [];
+        assert!(samples_to_bytes(&empty).is_empty());
+    }
+
     #[test]
     fn test_tcp_loopback_logic() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
