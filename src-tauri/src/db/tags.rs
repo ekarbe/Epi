@@ -35,7 +35,12 @@ pub struct Tag {
 /// All tags sorted by name.
 pub fn get_tags(conn: &Connection) -> rusqlite::Result<Vec<Tag>> {
     let mut stmt = conn.prepare("SELECT name, context FROM Tags ORDER BY name ASC")?;
-    let rows = stmt.query_map([], |row| Ok(Tag { name: row.get(0)?, context: row.get(1)? }))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Tag {
+            name: row.get(0)?,
+            context: row.get(1)?,
+        })
+    })?;
     rows.collect()
 }
 
@@ -50,7 +55,10 @@ pub fn save_tag_context(conn: &Connection, name: &str, context: &str) -> rusqlit
 
 /// Creates a tag with an empty context unless it already exists.
 pub fn ensure_tag_exists(conn: &Connection, name: &str) -> rusqlite::Result<()> {
-    conn.execute("INSERT OR IGNORE INTO Tags (name, context) VALUES (?1, '')", [name])?;
+    conn.execute(
+        "INSERT OR IGNORE INTO Tags (name, context) VALUES (?1, '')",
+        [name],
+    )?;
     Ok(())
 }
 
@@ -72,7 +80,10 @@ pub fn delete_tag(conn: &mut Connection, name: &str) -> rusqlite::Result<()> {
     };
     for (id, tags) in tagged {
         let remaining: Vec<String> = tags.into_iter().filter(|t| t != name).collect();
-        tx.execute("UPDATE Recordings SET tags = ?1 WHERE id = ?2", params![encode_tags(&remaining), id])?;
+        tx.execute(
+            "UPDATE Recordings SET tags = ?1 WHERE id = ?2",
+            params![encode_tags(&remaining), id],
+        )?;
     }
     tx.commit()
 }
@@ -83,7 +94,11 @@ pub async fn db_get_tags(db: State<'_, Db>) -> Result<Vec<Tag>, String> {
 }
 
 #[tauri::command]
-pub async fn db_save_tag_context(db: State<'_, Db>, name: String, context: String) -> Result<(), String> {
+pub async fn db_save_tag_context(
+    db: State<'_, Db>,
+    name: String,
+    context: String,
+) -> Result<(), String> {
     db.run(move |c| save_tag_context(c, &name, &context)).await
 }
 
@@ -114,8 +129,14 @@ mod tests {
         assert_eq!(
             get_tags(&conn).unwrap(),
             vec![
-                Tag { name: "a".into(), context: "second".into() },
-                Tag { name: "b".into(), context: "ctx".into() },
+                Tag {
+                    name: "a".into(),
+                    context: "second".into()
+                },
+                Tag {
+                    name: "b".into(),
+                    context: "ctx".into()
+                },
             ]
         );
     }
@@ -132,7 +153,13 @@ mod tests {
 
         delete_tag(&mut conn, "urgent").unwrap();
 
-        assert_eq!(get_tags(&conn).unwrap(), vec![Tag { name: "sync".into(), context: "".into() }]);
+        assert_eq!(
+            get_tags(&conn).unwrap(),
+            vec![Tag {
+                name: "sync".into(),
+                context: "".into()
+            }]
+        );
         let recs = get_library_recordings(&conn).unwrap();
         assert_eq!(recs[0].tags, Some(vec!["sync".to_string()]));
         assert_eq!(recs[1].tags, Some(vec!["sync".to_string()]));

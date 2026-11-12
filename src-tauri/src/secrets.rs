@@ -96,7 +96,9 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Reads a secret from the OS keyring.
@@ -153,7 +155,10 @@ mod tests {
     fn test_allowlist_rejects_unknown_names() {
         assert!(validate_name("openai").is_ok());
         assert!(validate_name("hf_token").is_ok());
-        assert_eq!(validate_name("ssh_key").unwrap_err(), "Unknown secret name: ssh_key");
+        assert_eq!(
+            validate_name("ssh_key").unwrap_err(),
+            "Unknown secret name: ssh_key"
+        );
         assert!(validate_name("").is_err());
         assert!(validate_name("OpenAI").is_err());
     }

@@ -34,7 +34,11 @@ pub struct Transcript {
 
 /// Stores the transcript of a recording, updating the existing one if there
 /// is one. Returns the transcript id.
-pub fn save_transcript(conn: &mut Connection, recording_id: i64, text_content: &str) -> rusqlite::Result<i64> {
+pub fn save_transcript(
+    conn: &mut Connection,
+    recording_id: i64,
+    text_content: &str,
+) -> rusqlite::Result<i64> {
     let tx = conn.transaction()?;
     let id = match get_transcript_for_recording(&tx, recording_id)? {
         Some(existing) => {
@@ -55,12 +59,18 @@ pub fn save_transcript(conn: &mut Connection, recording_id: i64, text_content: &
 
 /// Replaces the text of a transcript.
 pub fn update_transcript(conn: &Connection, id: i64, text_content: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE Transcripts SET text_content = ?1 WHERE id = ?2", params![text_content, id])?;
+    conn.execute(
+        "UPDATE Transcripts SET text_content = ?1 WHERE id = ?2",
+        params![text_content, id],
+    )?;
     Ok(())
 }
 
 /// The (first) transcript of a recording, or `None`.
-pub fn get_transcript_for_recording(conn: &Connection, recording_id: i64) -> rusqlite::Result<Option<Transcript>> {
+pub fn get_transcript_for_recording(
+    conn: &Connection,
+    recording_id: i64,
+) -> rusqlite::Result<Option<Transcript>> {
     conn.query_row(
         "SELECT id, recording_id, text_content, diarized_json FROM Transcripts
          WHERE recording_id = ?1 ORDER BY id ASC LIMIT 1",
@@ -78,24 +88,40 @@ pub fn get_transcript_for_recording(conn: &Connection, recording_id: i64) -> rus
 }
 
 /// Deletes all transcripts of a recording together with their summaries.
-pub fn delete_transcript_and_summary(conn: &mut Connection, recording_id: i64) -> rusqlite::Result<()> {
+pub fn delete_transcript_and_summary(
+    conn: &mut Connection,
+    recording_id: i64,
+) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     tx.execute(
         "DELETE FROM Summaries WHERE transcript_id IN (SELECT id FROM Transcripts WHERE recording_id = ?1)",
         [recording_id],
     )?;
-    tx.execute("DELETE FROM Transcripts WHERE recording_id = ?1", [recording_id])?;
+    tx.execute(
+        "DELETE FROM Transcripts WHERE recording_id = ?1",
+        [recording_id],
+    )?;
     tx.commit()
 }
 
 #[tauri::command]
-pub async fn db_save_transcript(db: State<'_, Db>, recording_id: i64, text_content: String) -> Result<i64, String> {
-    db.run(move |c| save_transcript(c, recording_id, &text_content)).await
+pub async fn db_save_transcript(
+    db: State<'_, Db>,
+    recording_id: i64,
+    text_content: String,
+) -> Result<i64, String> {
+    db.run(move |c| save_transcript(c, recording_id, &text_content))
+        .await
 }
 
 #[tauri::command]
-pub async fn db_update_transcript(db: State<'_, Db>, id: i64, text_content: String) -> Result<(), String> {
-    db.run(move |c| update_transcript(c, id, &text_content)).await
+pub async fn db_update_transcript(
+    db: State<'_, Db>,
+    id: i64,
+    text_content: String,
+) -> Result<(), String> {
+    db.run(move |c| update_transcript(c, id, &text_content))
+        .await
 }
 
 #[tauri::command]
@@ -103,12 +129,17 @@ pub async fn db_get_transcript_for_recording(
     db: State<'_, Db>,
     recording_id: i64,
 ) -> Result<Option<Transcript>, String> {
-    db.run(move |c| get_transcript_for_recording(c, recording_id)).await
+    db.run(move |c| get_transcript_for_recording(c, recording_id))
+        .await
 }
 
 #[tauri::command]
-pub async fn db_delete_transcript_and_summary(db: State<'_, Db>, recording_id: i64) -> Result<(), String> {
-    db.run(move |c| delete_transcript_and_summary(c, recording_id)).await
+pub async fn db_delete_transcript_and_summary(
+    db: State<'_, Db>,
+    recording_id: i64,
+) -> Result<(), String> {
+    db.run(move |c| delete_transcript_and_summary(c, recording_id))
+        .await
 }
 
 #[cfg(test)]
@@ -129,16 +160,26 @@ mod tests {
         let t = get_transcript_for_recording(&conn, rec).unwrap().unwrap();
         assert_eq!(
             t,
-            Transcript { id, recording_id: Some(rec), text_content: Some("second".into()), diarized_json: None }
+            Transcript {
+                id,
+                recording_id: Some(rec),
+                text_content: Some("second".into()),
+                diarized_json: None
+            }
         );
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM Transcripts", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM Transcripts", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 1);
     }
 
     #[test]
     fn test_save_transcript_rejects_unknown_recording() {
         let mut conn = open_in_memory();
-        assert!(save_transcript(&mut conn, 42, "orphan").is_err(), "foreign keys must be enforced");
+        assert!(
+            save_transcript(&mut conn, 42, "orphan").is_err(),
+            "foreign keys must be enforced"
+        );
     }
 
     #[test]
@@ -164,16 +205,29 @@ mod tests {
         delete_transcript_and_summary(&mut conn, rec).unwrap();
 
         assert!(get_transcript_for_recording(&conn, rec).unwrap().is_none());
-        assert!(summaries::get_summary_for_transcript(&conn, t).unwrap().is_none());
-        assert!(get_transcript_for_recording(&conn, other).unwrap().is_some());
-        assert!(summaries::get_summary_for_transcript(&conn, t_other).unwrap().is_some());
-        let recs: i64 = conn.query_row("SELECT COUNT(*) FROM Recordings", [], |r| r.get(0)).unwrap();
+        assert!(summaries::get_summary_for_transcript(&conn, t)
+            .unwrap()
+            .is_none());
+        assert!(get_transcript_for_recording(&conn, other)
+            .unwrap()
+            .is_some());
+        assert!(summaries::get_summary_for_transcript(&conn, t_other)
+            .unwrap()
+            .is_some());
+        let recs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM Recordings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(recs, 2);
     }
 
     #[test]
     fn test_serialized_field_names_match_frontend_types() {
-        let t = Transcript { id: 1, recording_id: Some(2), text_content: Some("x".into()), diarized_json: None };
+        let t = Transcript {
+            id: 1,
+            recording_id: Some(2),
+            text_content: Some("x".into()),
+            diarized_json: None,
+        };
         assert_eq!(
             serde_json::to_value(&t).unwrap(),
             serde_json::json!({"id": 1, "recordingId": 2, "textContent": "x", "diarizedJson": null})

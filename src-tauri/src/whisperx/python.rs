@@ -1,16 +1,17 @@
 // Epi - Local-first Meeting Intelligence
 
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, Window, Emitter};
 use crate::checksum::{verify_sha256, PinnedDownload};
 use flate2::read::GzDecoder;
+use std::path::{Path, PathBuf};
 use tar::Archive;
+use tauri::{AppHandle, Emitter, Manager, Window};
 
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::PermissionsExt;
 
 #[cfg(test)]
-const PBS_BASE: &str = "https://github.com/indygreg/python-build-standalone/releases/download/20240224/";
+const PBS_BASE: &str =
+    "https://github.com/indygreg/python-build-standalone/releases/download/20240224/";
 
 /// Pinned python-build-standalone 20240224 assets per `(os, arch)`, as reported by
 /// `std::env::consts`. Digests are taken from the release's published `SHA256SUMS`.
@@ -35,7 +36,10 @@ const PYTHON_DOWNLOADS: &[(&str, &str, PinnedDownload)] = &[
 
 /// Resolves the pinned python-build-standalone release (URL + SHA-256) for the given OS and architecture.
 fn python_download_for(os: &str, arch: &str) -> Result<PinnedDownload, String> {
-    if let Some((_, _, dl)) = PYTHON_DOWNLOADS.iter().find(|(o, a, _)| *o == os && *a == arch) {
+    if let Some((_, _, dl)) = PYTHON_DOWNLOADS
+        .iter()
+        .find(|(o, a, _)| *o == os && *a == arch)
+    {
         return Ok(*dl);
     }
     match os {
@@ -58,7 +62,9 @@ fn get_python_download() -> Result<PinnedDownload, String> {
 /// Any such entry aborts the extraction with an error.
 fn unpack_tar_gz_safely(bytes: &[u8], target_dir: &Path) -> Result<(), String> {
     let mut archive = Archive::new(GzDecoder::new(std::io::Cursor::new(bytes)));
-    let entries = archive.entries().map_err(|e| format!("Failed to read Python tar.gz: {}", e))?;
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Failed to read Python tar.gz: {}", e))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("Failed to read Python tar.gz entry: {}", e))?;
         let entry_path = entry
@@ -79,7 +85,10 @@ fn unpack_tar_gz_safely(bytes: &[u8], target_dir: &Path) -> Result<(), String> {
 }
 
 pub fn get_python_standalone_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
-    let mut path = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut path = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     path.push("python_standalone");
     Ok(path)
 }
@@ -88,17 +97,20 @@ pub fn get_portable_python_path(app_handle: &AppHandle) -> Result<PathBuf, Strin
     let base = get_python_standalone_dir(app_handle)?;
     // The tar.gz extracts to a root folder usually named 'python'
     let python_dir = base.join("python");
-    
+
     #[cfg(target_os = "windows")]
     let exe = python_dir.join("python.exe");
-    
+
     #[cfg(not(target_os = "windows"))]
     let exe = python_dir.join("bin").join("python3");
-    
+
     Ok(exe)
 }
 
-pub async fn install_portable_python(app_handle: &AppHandle, window: &Window) -> Result<(), String> {
+pub async fn install_portable_python(
+    app_handle: &AppHandle,
+    window: &Window,
+) -> Result<(), String> {
     let emit_log = |msg: &str| {
         let _ = window.emit("whisperx-install-log", msg.to_string());
     };
@@ -107,7 +119,8 @@ pub async fn install_portable_python(app_handle: &AppHandle, window: &Window) ->
     if target_dir.exists() {
         let _ = std::fs::remove_dir_all(&target_dir);
     }
-    std::fs::create_dir_all(&target_dir).map_err(|e| format!("Failed to create python_standalone dir: {}", e))?;
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("Failed to create python_standalone dir: {}", e))?;
 
     let download = get_python_download()?;
     let url = download.url;
@@ -118,10 +131,14 @@ pub async fn install_portable_python(app_handle: &AppHandle, window: &Window) ->
         .map_err(|e| format!("Failed to fetch Python release: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("Download failed with status: {}", response.status()));
+        return Err(format!(
+            "Download failed with status: {}",
+            response.status()
+        ));
     }
 
-    let bytes = response.bytes()
+    let bytes = response
+        .bytes()
         .await
         .map_err(|e| format!("Failed to read downloaded bytes: {}", e))?;
 
@@ -131,7 +148,10 @@ pub async fn install_portable_python(app_handle: &AppHandle, window: &Window) ->
         emit_log(&format!("ERR: {}", e));
         e
     })?;
-    log::info!("Standalone Python archive SHA-256 verified ({})", download.sha256);
+    log::info!(
+        "Standalone Python archive SHA-256 verified ({})",
+        download.sha256
+    );
     emit_log(&format!("SHA-256 checksum verified ({}).", download.sha256));
 
     emit_log("Download complete. Extracting Python (this may take a minute)...");
@@ -141,7 +161,10 @@ pub async fn install_portable_python(app_handle: &AppHandle, window: &Window) ->
 
     let py_path = get_portable_python_path(app_handle)?;
     if !py_path.exists() {
-        return Err(format!("Python executable not found at expected path {:?}", py_path));
+        return Err(format!(
+            "Python executable not found at expected path {:?}",
+            py_path
+        ));
     }
 
     #[cfg(target_family = "unix")]
@@ -181,17 +204,33 @@ mod tests {
     fn test_every_python_download_is_pinned() {
         assert_eq!(PYTHON_DOWNLOADS.len(), 4);
         for (os, arch, dl) in PYTHON_DOWNLOADS {
-            assert!(dl.url.starts_with(PBS_BASE), "{}/{}: unexpected URL {}", os, arch, dl.url);
+            assert!(
+                dl.url.starts_with(PBS_BASE),
+                "{}/{}: unexpected URL {}",
+                os,
+                arch,
+                dl.url
+            );
             assert!(dl.url.ends_with("-install_only.tar.gz"));
-            assert!(is_sha256_hex(dl.sha256), "{}/{}: invalid SHA-256 {}", os, arch, dl.sha256);
+            assert!(
+                is_sha256_hex(dl.sha256),
+                "{}/{}: invalid SHA-256 {}",
+                os,
+                arch,
+                dl.sha256
+            );
             assert_eq!(python_download_for(os, arch).unwrap(), *dl);
         }
     }
 
     #[test]
     fn test_python_download_unsupported_platforms() {
-        assert!(python_download_for("linux", "aarch64").unwrap_err().contains("Linux"));
-        assert!(python_download_for("freebsd", "x86_64").unwrap_err().contains("operating system"));
+        assert!(python_download_for("linux", "aarch64")
+            .unwrap_err()
+            .contains("Linux"));
+        assert!(python_download_for("freebsd", "x86_64")
+            .unwrap_err()
+            .contains("operating system"));
     }
 
     fn tar_gz_with_entry(path: &str, data: &[u8]) -> Vec<u8> {
@@ -203,7 +242,10 @@ mod tests {
         header.set_mode(0o644);
         header.set_entry_type(tar::EntryType::Regular);
         header.set_cksum();
-        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
         builder.append(&header, data).unwrap();
         builder.into_inner().unwrap().finish().unwrap()
     }
@@ -213,7 +255,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bytes = tar_gz_with_entry("python/bin/python3", b"#!fake");
         unpack_tar_gz_safely(&bytes, dir.path()).unwrap();
-        assert_eq!(std::fs::read(dir.path().join("python/bin/python3")).unwrap(), b"#!fake");
+        assert_eq!(
+            std::fs::read(dir.path().join("python/bin/python3")).unwrap(),
+            b"#!fake"
+        );
     }
 
     #[test]

@@ -15,10 +15,10 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use tauri::Manager;
+use crate::whisperx::python::get_portable_python_path;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
-use crate::whisperx::python::get_portable_python_path;
+use tauri::Manager;
 
 pub(crate) fn get_hf_cache_dir() -> Result<PathBuf, String> {
     let cache_dir = dirs::home_dir()
@@ -30,7 +30,10 @@ pub(crate) fn get_hf_cache_dir() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn get_env_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
-    let mut path = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut path = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     path.push("whisperx_env");
     Ok(path)
 }
@@ -58,7 +61,11 @@ pub(crate) fn get_python_path(env_path: &Path) -> PathBuf {
 }
 
 pub(crate) fn resolve_system_python() -> Option<String> {
-    let python_cmd = if cfg!(target_os = "windows") { "python" } else { "python3" };
+    let python_cmd = if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        "python3"
+    };
     let mut cmd = std::process::Command::new(python_cmd);
     #[cfg(target_os = "windows")]
     {
@@ -71,7 +78,7 @@ pub(crate) fn resolve_system_python() -> Option<String> {
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false) 
+        .unwrap_or(false)
     {
         Some(python_cmd.to_string())
     } else if cfg!(target_os = "windows") {
@@ -87,7 +94,7 @@ pub(crate) fn resolve_system_python() -> Option<String> {
             .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
-            .unwrap_or(false) 
+            .unwrap_or(false)
         {
             Some("python3".to_string())
         } else {
@@ -153,7 +160,7 @@ pub(crate) fn get_active_python_path(app_handle: &AppHandle) -> Result<String, S
             return Ok(portable.to_string_lossy().to_string());
         }
     }
-    
+
     resolve_system_python().ok_or_else(|| "No python/python3 found on system".to_string())
 }
 
@@ -192,6 +199,8 @@ mod tests {
 
     #[test]
     fn test_python_version_is_supported_missing_interpreter() {
-        assert!(!python_version_is_supported("/nonexistent/python-for-epi-test"));
+        assert!(!python_version_is_supported(
+            "/nonexistent/python-for-epi-test"
+        ));
     }
 }

@@ -22,16 +22,16 @@
 //! upon application exit.
 
 mod audio;
-mod whisperx;
-mod cloud_transcription;
-mod cloud_llm;
-mod local_llm;
-mod secrets;
-pub mod process_manager;
-mod utils;
 mod checksum;
+mod cloud_llm;
+mod cloud_transcription;
 mod db;
 pub mod ffmpeg;
+mod local_llm;
+pub mod process_manager;
+mod secrets;
+mod utils;
+mod whisperx;
 
 /// Calculates the total disk space (in bytes) occupied by files within the "Epi Library" directory.
 ///
@@ -77,7 +77,13 @@ pub struct StorageBreakdown {
 #[tauri::command]
 async fn get_storage_breakdown() -> Result<StorageBreakdown, String> {
     tokio::task::spawn_blocking(|| {
-        let mut breakdown = StorageBreakdown { recordings: 0, transcriptions: 0, summaries: 0, logs: 0, total: 0 };
+        let mut breakdown = StorageBreakdown {
+            recordings: 0,
+            transcriptions: 0,
+            summaries: 0,
+            logs: 0,
+            total: 0,
+        };
         if let Some(docs) = dirs::document_dir() {
             let lib_dir = docs.join("Epi Library");
             if lib_dir.exists() {
@@ -98,7 +104,10 @@ async fn get_storage_breakdown() -> Result<StorageBreakdown, String> {
                 breakdown.transcriptions = get_dir_size("Transcriptions");
                 breakdown.summaries = get_dir_size("Summaries");
                 breakdown.logs = get_dir_size("Logs");
-                breakdown.total = breakdown.recordings + breakdown.transcriptions + breakdown.summaries + breakdown.logs;
+                breakdown.total = breakdown.recordings
+                    + breakdown.transcriptions
+                    + breakdown.summaries
+                    + breakdown.logs;
             }
         }
         Ok(breakdown)
@@ -113,11 +122,11 @@ async fn get_storage_breakdown() -> Result<StorageBreakdown, String> {
 async fn get_available_disk_space() -> Result<u64, String> {
     tokio::task::spawn_blocking(|| {
         let disks = sysinfo::Disks::new_with_refreshed_list();
-        
+
         if let Some(docs) = dirs::document_dir() {
             let mut best_disk: Option<&sysinfo::Disk> = None;
             let mut longest_prefix = 0;
-            
+
             for disk in disks.list() {
                 if docs.starts_with(disk.mount_point()) {
                     let len = disk.mount_point().as_os_str().len();
@@ -127,13 +136,18 @@ async fn get_available_disk_space() -> Result<u64, String> {
                     }
                 }
             }
-            
+
             if let Some(disk) = best_disk {
                 return Ok(disk.available_space());
             }
         }
-        
-        let max_space = disks.list().iter().map(|d| d.available_space()).max().unwrap_or(0);
+
+        let max_space = disks
+            .list()
+            .iter()
+            .map(|d| d.available_space())
+            .max()
+            .unwrap_or(0);
         Ok(max_space)
     })
     .await
@@ -142,8 +156,8 @@ async fn get_available_disk_space() -> Result<u64, String> {
 
 /// Resolves the absolute path of the `~/Documents/Epi Library` directory.
 fn library_dir() -> Result<std::path::PathBuf, String> {
-    let docs = dirs::document_dir()
-        .ok_or_else(|| "Could not find documents directory".to_string())?;
+    let docs =
+        dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
     Ok(docs.join("Epi Library"))
 }
 
@@ -214,8 +228,8 @@ async fn delete_audio_file(filename: String) -> Result<(), String> {
 #[tauri::command]
 async fn delete_all_logs() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir()
-            .ok_or_else(|| "Could not find documents directory".to_string())?;
+        let docs =
+            dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
         let logs_dir = docs.join("Epi Library").join("Logs");
         if logs_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(logs_dir) {
@@ -242,18 +256,19 @@ async fn delete_all_logs() -> Result<(), String> {
 #[tauri::command]
 async fn append_app_log(log: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let docs = dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
+        let docs =
+            dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
         let log_dir = docs.join("Epi Library").join("Logs");
         std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
         let log_file = log_dir.join("app.log");
-        
+
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_file)
             .map_err(|e| e.to_string())?;
-            
+
         writeln!(file, "{}", log).map_err(|e| e.to_string())
     })
     .await
@@ -299,7 +314,11 @@ async fn delete_transcript_files(filename: String) -> Result<(), String> {
 /// # Side Effects
 /// * Creates the subdirectory if needed and creates or overwrites the file.
 #[tauri::command]
-async fn write_library_text_file(subdir: String, file_name: String, contents: String) -> Result<(), String> {
+async fn write_library_text_file(
+    subdir: String,
+    file_name: String,
+    contents: String,
+) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         crate::utils::write_library_text_file_in(&library_dir()?, &subdir, &file_name, &contents)
     })
@@ -321,16 +340,20 @@ pub fn run() {
     let log_file_path = dirs::document_dir()
         .map(|d| d.join("Epi Library").join("Logs").join("app.log"))
         .unwrap_or_else(|| std::path::PathBuf::from("app.log"));
-        
+
     if let Some(parent) = log_file_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    
-    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_file_path) {
+
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file_path)
+    {
         let _ = simplelog::WriteLogger::init(
             simplelog::LevelFilter::Info,
             simplelog::Config::default(),
-            file
+            file,
         );
     }
 
@@ -339,7 +362,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(audio::AudioState::default())
-        .manage(whisperx::LiveTranscriptionState(std::sync::Mutex::new(None)))
+        .manage(whisperx::LiveTranscriptionState(std::sync::Mutex::new(
+            None,
+        )))
         .manage(process_manager::ProcessRegistry::new())
         .setup(|app| {
             use tauri::Manager;
@@ -423,7 +448,7 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
-                
+
                 // Kill live transcription process
                 let live_state = app_handle.state::<whisperx::LiveTranscriptionState>();
                 let mut guard = live_state.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -434,7 +459,10 @@ pub fn run() {
 
                 // Kill audio recording process
                 let audio_state = app_handle.state::<audio::AudioState>();
-                let mut session_guard = audio_state.session.lock().unwrap_or_else(|e| e.into_inner());
+                let mut session_guard = audio_state
+                    .session
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if let Some(session) = session_guard.take() {
                     let mut child = session.process;
                     #[cfg(unix)]
@@ -458,7 +486,6 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-
 
     #[test]
     fn test_library_compiles() {

@@ -62,13 +62,19 @@ impl Db {
     /// Creates a handle for the database at `path`. The file is opened (and
     /// created, together with its parent directory) on first use.
     pub fn new(path: PathBuf) -> Self {
-        Self { path: Some(path), conn: Arc::new(Mutex::new(None)) }
+        Self {
+            path: Some(path),
+            conn: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Wraps an already opened and migrated connection.
     #[cfg(test)]
     pub fn from_connection(conn: Connection) -> Self {
-        Self { path: None, conn: Arc::new(Mutex::new(Some(conn))) }
+        Self {
+            path: None,
+            conn: Arc::new(Mutex::new(Some(conn))),
+        }
     }
 
     /// Runs `f` with the connection on the blocking thread pool, opening and
@@ -98,8 +104,13 @@ impl Db {
 /// connection and applies pending migrations.
 pub fn open(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Could not create database directory {}: {}", parent.display(), e))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Could not create database directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
     let mut conn = Connection::open(path)
         .map_err(|e| format!("Could not open database {}: {}", path.display(), e))?;
@@ -149,7 +160,11 @@ mod tests {
     use super::*;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(f)
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
     }
 
     #[test]
@@ -158,7 +173,9 @@ mod tests {
         let path = dir.path().join("nested").join(DB_FILE_NAME);
         let conn = open(&path).unwrap();
         assert!(path.exists());
-        let fk: i64 = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0)).unwrap();
+        let fk: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1);
     }
 
@@ -169,8 +186,11 @@ mod tests {
         let db = Db::new(path.clone());
         assert!(!path.exists());
 
-        let id = block_on(db.run(|c| recordings::save_recording(c, "a.ogg", 1.0, None, None))).unwrap();
-        let count = block_on(db.run(|c| stats::get_stats(c))).unwrap().recordings_count;
+        let id =
+            block_on(db.run(|c| recordings::save_recording(c, "a.ogg", 1.0, None, None))).unwrap();
+        let count = block_on(db.run(|c| stats::get_stats(c)))
+            .unwrap()
+            .recordings_count;
         assert!(path.exists());
         assert_eq!(id, 1);
         assert_eq!(count, 1);
@@ -179,7 +199,8 @@ mod tests {
     #[test]
     fn test_run_reports_sql_errors() {
         let db = Db::from_connection(open_in_memory());
-        let err = block_on(db.run(|c| c.execute("INSERT INTO Missing VALUES (1)", []))).unwrap_err();
+        let err =
+            block_on(db.run(|c| c.execute("INSERT INTO Missing VALUES (1)", []))).unwrap_err();
         assert!(err.starts_with("Database error:"), "{}", err);
     }
 

@@ -22,26 +22,43 @@ use std::time::Duration;
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
 #[cfg(not(test))]
-fn get_openai_url() -> String { "https://api.openai.com/v1/chat/completions".to_string() }
+fn get_openai_url() -> String {
+    "https://api.openai.com/v1/chat/completions".to_string()
+}
 #[cfg(test)]
-fn get_openai_url() -> String { std::env::var("MOCK_OPENAI_URL").unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string()) }
+fn get_openai_url() -> String {
+    std::env::var("MOCK_OPENAI_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string())
+}
 
 #[cfg(not(test))]
-fn get_anthropic_url() -> String { "https://api.anthropic.com/v1/messages".to_string() }
+fn get_anthropic_url() -> String {
+    "https://api.anthropic.com/v1/messages".to_string()
+}
 #[cfg(test)]
-fn get_anthropic_url() -> String { std::env::var("MOCK_ANTHROPIC_URL").unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".to_string()) }
+fn get_anthropic_url() -> String {
+    std::env::var("MOCK_ANTHROPIC_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".to_string())
+}
 
 #[cfg(not(test))]
-fn get_google_url(model: &str, key: &str) -> String { format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, key) }
+fn get_google_url(model: &str, key: &str) -> String {
+    format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, key
+    )
+}
 #[cfg(test)]
-fn get_google_url(model: &str, key: &str) -> String { 
+fn get_google_url(model: &str, key: &str) -> String {
     if let Ok(url) = std::env::var("MOCK_GOOGLE_URL") {
         url
     } else {
-        format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, key)
+        format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, key
+        )
     }
 }
-
 
 /// Returns a shared, lazily-initialized HTTP client with configured connection pooling and timeout.
 fn get_client() -> &'static Client {
@@ -81,8 +98,12 @@ pub async fn generate_cloud_summary(
 
     match provider.as_str() {
         "openai" => {
-            let active_model = if model.is_empty() { "gpt-4o-mini" } else { &model };
-            
+            let active_model = if model.is_empty() {
+                "gpt-4o-mini"
+            } else {
+                &model
+            };
+
             let body = serde_json::json!({
                 "model": active_model,
                 "messages": [
@@ -103,12 +124,21 @@ pub async fn generate_cloud_summary(
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| format!("OpenAI request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+                .map_err(|e| {
+                    format!(
+                        "OpenAI request failed: {}",
+                        e.to_string().replace(&api_key, "REDACTED")
+                    )
+                })?;
 
             if !res.status().is_success() {
                 let status = res.status();
                 let text = res.text().await.unwrap_or_default();
-                return Err(format!("OpenAI API error {}: {}", status, text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "OpenAI API error {}: {}",
+                    status,
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             let parsed: serde_json::Value = res
@@ -116,7 +146,9 @@ pub async fn generate_cloud_summary(
                 .await
                 .map_err(|e| format!("Failed to parse OpenAI response: {}", e))?;
 
-            let choices = parsed["choices"].as_array().ok_or("No choices found in OpenAI response")?;
+            let choices = parsed["choices"]
+                .as_array()
+                .ok_or("No choices found in OpenAI response")?;
             if choices.is_empty() {
                 return Err("OpenAI response choices array is empty".into());
             }
@@ -129,8 +161,12 @@ pub async fn generate_cloud_summary(
             Ok(text)
         }
         "anthropic" => {
-            let active_model = if model.is_empty() { "claude-haiku-4-5" } else { &model };
-            
+            let active_model = if model.is_empty() {
+                "claude-haiku-4-5"
+            } else {
+                &model
+            };
+
             let body = serde_json::json!({
                 "model": active_model,
                 "max_tokens": 4096,
@@ -149,12 +185,21 @@ pub async fn generate_cloud_summary(
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| format!("Anthropic request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+                .map_err(|e| {
+                    format!(
+                        "Anthropic request failed: {}",
+                        e.to_string().replace(&api_key, "REDACTED")
+                    )
+                })?;
 
             if !res.status().is_success() {
                 let status = res.status();
                 let text = res.text().await.unwrap_or_default();
-                return Err(format!("Anthropic API error {}: {}", status, text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "Anthropic API error {}: {}",
+                    status,
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             let parsed: serde_json::Value = res
@@ -162,7 +207,9 @@ pub async fn generate_cloud_summary(
                 .await
                 .map_err(|e| format!("Failed to parse Anthropic response: {}", e))?;
 
-            let content = parsed["content"].as_array().ok_or("No content array found in Anthropic response")?;
+            let content = parsed["content"]
+                .as_array()
+                .ok_or("No content array found in Anthropic response")?;
             if content.is_empty() {
                 return Err("Anthropic response content array is empty".into());
             }
@@ -193,21 +240,26 @@ pub async fn generate_cloud_summary(
 
             let url = get_google_url(active_model, &api_key);
 
-            let res = client
-                .post(&url)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("Google AI request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+            let res = client.post(&url).json(&body).send().await.map_err(|e| {
+                format!(
+                    "Google AI request failed: {}",
+                    e.to_string().replace(&api_key, "REDACTED")
+                )
+            })?;
 
             if !res.status().is_success() {
                 let text = res.text().await.unwrap_or_default();
-                return Err(format!("Google AI Studio error: {}", text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "Google AI Studio error: {}",
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             let parsed: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-            
-            let candidates = parsed["candidates"].as_array().ok_or("No candidates found in Google response")?;
+
+            let candidates = parsed["candidates"]
+                .as_array()
+                .ok_or("No candidates found in Google response")?;
             if candidates.is_empty() {
                 return Err("Google response contains empty candidates (possibly blocked by safety filters).".into());
             }
@@ -226,8 +278,8 @@ pub async fn generate_cloud_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{OnceLock, Mutex};
-    
+    use std::sync::{Mutex, OnceLock};
+
     static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
     fn get_test_mutex() -> &'static Mutex<()> {
         TEST_MUTEX.get_or_init(|| Mutex::new(()))
@@ -241,7 +293,8 @@ mod tests {
             "prompt".to_string(),
             "".to_string(),
             "gpt-4".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "API key for openai is missing.");
     }
@@ -254,7 +307,8 @@ mod tests {
             "prompt".to_string(),
             "   ".to_string(),
             "claude-3".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "API key for anthropic is missing.");
     }
@@ -267,7 +321,8 @@ mod tests {
             "prompt".to_string(),
             "key".to_string(),
             "model".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "Unknown LLM provider: unknown");
     }
@@ -281,10 +336,11 @@ mod tests {
             "prompt".to_string(),
             "FAKE_KEY_123".to_string(),
             "gpt-4".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert!(!err.contains("FAKE_KEY_123")); 
+        assert!(!err.contains("FAKE_KEY_123"));
         assert!(err.contains("REDACTED") || err.contains("error") || err.contains("failed"));
     }
 
@@ -297,10 +353,11 @@ mod tests {
             "prompt".to_string(),
             "FAKE_KEY_123".to_string(),
             "".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert!(!err.contains("FAKE_KEY_123")); 
+        assert!(!err.contains("FAKE_KEY_123"));
     }
 
     #[tokio::test]
@@ -312,10 +369,11 @@ mod tests {
             "prompt".to_string(),
             "FAKE_KEY_123".to_string(),
             "models/gemini-1.5".to_string(),
-        ).await;
+        )
+        .await;
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert!(!err.contains("FAKE_KEY_123")); 
+        assert!(!err.contains("FAKE_KEY_123"));
     }
 
     #[tokio::test]
@@ -337,7 +395,8 @@ mod tests {
             "prompt {{transcript}}".to_string(),
             "key".to_string(),
             "gpt-4".to_string(),
-        ).await;
+        )
+        .await;
 
         std::env::remove_var("MOCK_OPENAI_URL");
 
@@ -365,7 +424,8 @@ mod tests {
             "prompt {{transcript}}".to_string(),
             "key".to_string(),
             "claude-3".to_string(),
-        ).await;
+        )
+        .await;
 
         std::env::remove_var("MOCK_ANTHROPIC_URL");
 
@@ -393,7 +453,8 @@ mod tests {
             "prompt {{transcript}}".to_string(),
             "key".to_string(),
             "models/gemini".to_string(),
-        ).await;
+        )
+        .await;
 
         std::env::remove_var("MOCK_GOOGLE_URL");
 

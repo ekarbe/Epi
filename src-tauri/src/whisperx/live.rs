@@ -15,13 +15,13 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use tauri::Emitter;
-use tauri::{AppHandle, Window, Manager};
-use std::process::Command;
-use std::io::{BufRead, BufReader};
-use std::thread;
 use crate::utils::validate_model_name;
 use crate::whisperx::env::{get_env_path, get_python_path};
+use std::io::{BufRead, BufReader};
+use std::process::Command;
+use std::thread;
+use tauri::Emitter;
+use tauri::{AppHandle, Manager, Window};
 
 /// A thread-safe wrapper containing the active live transcription subprocess child.
 /// Spun up to handle real-time audio feeds from the microphone.
@@ -69,7 +69,7 @@ pub fn build_whisperx_command(
     cmd.arg(script_path);
     cmd.arg("--model").arg(model);
     cmd.arg("--language").arg(language);
-    
+
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -79,7 +79,7 @@ pub fn build_whisperx_command(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    
+
     cmd
 }
 
@@ -93,7 +93,7 @@ pub fn start_live_transcription(
     validate_model_name(&model)?;
     let state = app_handle.state::<LiveTranscriptionState>();
     let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    
+
     if let Some(mut old_child) = guard.take() {
         let _ = old_child.kill();
         let _ = old_child.wait();
@@ -101,17 +101,22 @@ pub fn start_live_transcription(
 
     let env_path = get_env_path(&app_handle)?;
     let python_bin = get_python_path(&env_path);
-    
+
     if !python_bin.exists() {
         return Err("WhisperX is not installed locally.".into());
     }
 
-    let resource_dir = app_handle.path().resource_dir().map_err(|e| e.to_string())?;
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?;
     let script_path = resource_dir.join("src").join("live_transcribe.py");
 
     let mut cmd = build_whisperx_command(&python_bin, &script_path, &model, &language);
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to start live transcription: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start live transcription: {}", e))?;
 
     let mut stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
@@ -144,7 +149,10 @@ pub fn start_live_transcription(
             }
         }
         // Emit termination event when stdout stream hits EOF (process ends or crashes)
-        let _ = w1.emit("live-transcription-terminated", "Process ended or connection closed");
+        let _ = w1.emit(
+            "live-transcription-terminated",
+            "Process ended or connection closed",
+        );
     });
 
     let w2 = window.clone();
@@ -190,30 +198,42 @@ mod tests {
     fn test_parse_stdout_line_text() {
         let line = "[TEXT] Hello world!";
         let event = parse_stdout_line(line);
-        assert_eq!(event, LiveTranscriptionEvent::Update("Hello world!".to_string()));
+        assert_eq!(
+            event,
+            LiveTranscriptionEvent::Update("Hello world!".to_string())
+        );
     }
 
     #[test]
     fn test_parse_stdout_line_text_with_spaces() {
         let line = "[TEXT]    Trailing and leading spaces   ";
         let event = parse_stdout_line(line);
-        assert_eq!(event, LiveTranscriptionEvent::Update("Trailing and leading spaces".to_string()));
+        assert_eq!(
+            event,
+            LiveTranscriptionEvent::Update("Trailing and leading spaces".to_string())
+        );
     }
 
     #[test]
     fn test_parse_stdout_line_status() {
         let line = "Loading model...";
         let event = parse_stdout_line(line);
-        assert_eq!(event, LiveTranscriptionEvent::Status("Loading model...".to_string()));
+        assert_eq!(
+            event,
+            LiveTranscriptionEvent::Status("Loading model...".to_string())
+        );
     }
 
     #[test]
     fn test_parse_stdout_line_status_brackets() {
         let line = "[INFO] Loading model...";
         let event = parse_stdout_line(line);
-        assert_eq!(event, LiveTranscriptionEvent::Status("[INFO] Loading model...".to_string()));
+        assert_eq!(
+            event,
+            LiveTranscriptionEvent::Status("[INFO] Loading model...".to_string())
+        );
     }
-    
+
     #[test]
     fn test_parse_stdout_line_empty() {
         let line = "";
@@ -226,7 +246,10 @@ mod tests {
         // Missing space after [TEXT]
         let line = "[TEXT]Hello world!";
         let event = parse_stdout_line(line);
-        assert_eq!(event, LiveTranscriptionEvent::Status("[TEXT]Hello world!".to_string()));
+        assert_eq!(
+            event,
+            LiveTranscriptionEvent::Status("[TEXT]Hello world!".to_string())
+        );
     }
 
     #[test]
@@ -234,11 +257,14 @@ mod tests {
         let python_bin = std::path::Path::new("/fake/python");
         let script_path = std::path::Path::new("/fake/script.py");
         let cmd = build_whisperx_command(python_bin, script_path, "base.en", "en");
-        
+
         let program = cmd.get_program().to_string_lossy();
         assert_eq!(program, "/fake/python");
-        
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert_eq!(args[0], "-u");
         assert_eq!(args[1], "/fake/script.py");
         assert_eq!(args[2], "--model");

@@ -55,7 +55,6 @@ impl Default for AudioState {
     }
 }
 
-
 /// Capacity (in callback chunks) of the channel between a CPAL audio callback
 /// and its TCP loopback writer thread.
 ///
@@ -284,7 +283,7 @@ fn spawn_tcp_loopback_with_timeout(
                 "s8" | "u8" => 1,
                 _ => 4,
             };
-            
+
             let bytes_per_sec = (sample_rate * channels as u32 * bytes_per_sample) as f64;
             let frame_size = (channels as u32 * bytes_per_sample) as u64;
 
@@ -297,7 +296,7 @@ fn spawn_tcp_loopback_with_timeout(
             } else if format_str == "u16le" {
                 for i in (0..silence_buf.len()).step_by(2) {
                     silence_buf[i] = 0x00;
-                    silence_buf[i+1] = 0x80;
+                    silence_buf[i + 1] = 0x80;
                 }
             }
 
@@ -315,11 +314,11 @@ fn spawn_tcp_loopback_with_timeout(
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         let elapsed_secs = start_time.elapsed().as_secs_f64();
                         let expected_bytes = (elapsed_secs * bytes_per_sec) as u64;
-                        
+
                         if expected_bytes > total_bytes_sent {
                             let mut missing_bytes = expected_bytes - total_bytes_sent;
                             missing_bytes = (missing_bytes / frame_size) * frame_size;
-                            
+
                             if missing_bytes > 0 {
                                 let mut to_write = missing_bytes;
                                 while to_write > 0 {
@@ -359,10 +358,14 @@ pub fn build_ffmpeg_command(
     }
 
     for (port, rate, channels, format_str) in tcp_ports {
-        cmd.arg("-f").arg(*format_str)
-            .arg("-ar").arg(rate.to_string())
-            .arg("-ac").arg(channels.to_string())
-            .arg("-i").arg(format!("tcp://127.0.0.1:{}", port));
+        cmd.arg("-f")
+            .arg(*format_str)
+            .arg("-ar")
+            .arg(rate.to_string())
+            .arg("-ac")
+            .arg(channels.to_string())
+            .arg("-i")
+            .arg(format!("tcp://127.0.0.1:{}", port));
     }
 
     let mut filter_inputs = String::new();
@@ -371,8 +374,10 @@ pub fn build_ffmpeg_command(
     }
 
     if input_count > 1 {
-        cmd.arg("-filter_complex")
-           .arg(format!("{}amix=inputs={}:duration=longest:normalize=0,asplit=2[out1][out2]", filter_inputs, input_count));
+        cmd.arg("-filter_complex").arg(format!(
+            "{}amix=inputs={}:duration=longest:normalize=0,asplit=2[out1][out2]",
+            filter_inputs, input_count
+        ));
     } else if input_count == 1 {
         cmd.arg("-filter_complex").arg("[0:a]asplit=2[out1][out2]");
     }
@@ -466,10 +471,7 @@ fn build_stream(
     Ok(stream)
 }
 
-fn find_device(
-    host: &cpal::Host,
-    selection: &AudioDeviceSelection,
-) -> Option<cpal::Device> {
+fn find_device(host: &cpal::Host, selection: &AudioDeviceSelection) -> Option<cpal::Device> {
     if selection.name == "Default Audio Device" || selection.name == "default" {
         return if selection.is_input {
             host.default_input_device()
@@ -514,8 +516,8 @@ pub async fn start_recording_inner(
                 .to_string_lossy()
                 .to_string();
             Some(valid)
-        },
-        None => None
+        }
+        None => None,
     };
 
     {
@@ -563,7 +565,8 @@ pub async fn start_recording_inner(
     for selection in &names_to_use {
         #[cfg(target_os = "linux")]
         {
-            let resolved_name = crate::audio::device::resolve_pulse_device(&selection.name, selection.is_output);
+            let resolved_name =
+                crate::audio::device::resolve_pulse_device(&selection.name, selection.is_output);
             let mut input_name = resolved_name;
             if selection.is_output && !input_name.ends_with(".monitor") {
                 input_name = format!("{}.monitor", input_name);
@@ -578,14 +581,15 @@ pub async fn start_recording_inner(
         }
 
         #[allow(unreachable_code)]
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("Failed to bind TCP: {}", e))?;
+        let listener =
+            TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Failed to bind TCP: {}", e))?;
         let port = listener.local_addr().unwrap().port();
 
         let (tx, rx) = audio_chunk_channel();
 
-        let (stream_box, sample_rate, channels, format_str) = state.cpal_builder.build_and_start(selection, tx)?;
-        
+        let (stream_box, sample_rate, channels, format_str) =
+            state.cpal_builder.build_and_start(selection, tx)?;
+
         tcp_ports.push((port, sample_rate, channels, format_str));
 
         spawn_tcp_loopback(listener, rx, sample_rate, channels, format_str);
@@ -612,7 +616,9 @@ pub async fn start_recording_inner(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stdin(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
 
     let tx = state.audio_tx.clone();
     if let Some(mut stdout) = child.stdout.take() {
@@ -620,7 +626,9 @@ pub async fn start_recording_inner(
             use std::io::Read;
             let mut buf = [0u8; 4096];
             while let Ok(n) = stdout.read(&mut buf) {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 let _ = tx.send(buf[..n].to_vec());
             }
         });
@@ -662,14 +670,16 @@ pub async fn start_recording(
     let ffmpeg_path = crate::ffmpeg::get_local_ffmpeg_path(&app)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "ffmpeg".to_string());
-    
+
     start_recording_inner(&state, ffmpeg_path, output_path, log_path, device_names).await
 }
 
 pub async fn stop_recording_inner(state: &AudioState) -> Result<Vec<String>, String> {
     let session = {
         let mut session_guard = state.session.lock().unwrap_or_else(|e| e.into_inner());
-        session_guard.take().ok_or_else(|| "Not recording".to_string())?
+        session_guard
+            .take()
+            .ok_or_else(|| "Not recording".to_string())?
     };
 
     let mut child = session.process;
@@ -743,9 +753,9 @@ pub async fn stop_recording(state: State<'_, AudioState>) -> Result<Vec<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use std::io::Read;
-    
+
     #[test]
     fn test_samples_to_bytes_native_endian() {
         let f: [f32; 2] = [1.0, -0.5];
@@ -777,18 +787,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = audio_chunk_channel();
-        
+
         let handle = spawn_tcp_loopback(listener, rx, 48000, 2, "f32le");
-        
+
         let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        
+
         tx.send(vec![1, 2, 3]).unwrap();
         tx.send(vec![4, 5]).unwrap();
         drop(tx);
-        
+
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).unwrap();
-        
+
         assert_eq!(buf, vec![1, 2, 3, 4, 5]);
         handle.join().unwrap();
     }
@@ -871,9 +881,15 @@ mod tests {
             &[(8080, 48000, 2, "f32le"), (8081, 44100, 1, "s16le")],
             &[],
         );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-filter_complex".to_string()));
-        assert!(args.contains(&"[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,asplit=2[out1][out2]".to_string()));
+        assert!(args.contains(
+            &"[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,asplit=2[out1][out2]"
+                .to_string()
+        ));
         assert!(args.contains(&"tcp://127.0.0.1:8080".to_string()));
         assert!(args.contains(&"tcp://127.0.0.1:8081".to_string()));
         assert!(args.contains(&"out.ogg".to_string()));
@@ -882,13 +898,11 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_build_ffmpeg_command_windows_single_source() {
-        let cmd = build_ffmpeg_command(
-            "ffmpeg.exe",
-            "out.ogg",
-            &[(8080, 48000, 2, "f32le")],
-            &[],
-        );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let cmd = build_ffmpeg_command("ffmpeg.exe", "out.ogg", &[(8080, 48000, 2, "f32le")], &[]);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-filter_complex".to_string()));
         assert!(args.contains(&"[0:a]asplit=2[out1][out2]".to_string()));
     }
@@ -902,7 +916,10 @@ mod tests {
             &[],
             &["alsa_input.pci-0000_00_1f.3.analog-stereo".to_string()],
         );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-f".to_string()));
         assert!(args.contains(&"pulse".to_string()));
         assert!(args.contains(&"alsa_input.pci-0000_00_1f.3.analog-stereo".to_string()));
@@ -955,16 +972,20 @@ mod tests {
     fn test_streams_dropped_on_session_end() {
         let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let detector = DropDetector(dropped.clone());
-        
+
         let session = RecordingSession {
             #[cfg(unix)]
             process: std::process::Command::new("echo").spawn().unwrap(),
             #[cfg(windows)]
-            process: std::process::Command::new("cmd").arg("/c").arg("echo").spawn().unwrap(),
+            process: std::process::Command::new("cmd")
+                .arg("/c")
+                .arg("echo")
+                .spawn()
+                .unwrap(),
             output_path: "test".to_string(),
             _streams: vec![Box::new(detector)],
         };
-        
+
         drop(session);
         assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
     }
@@ -972,11 +993,10 @@ mod tests {
     #[test]
     fn test_mock_cpal_stream_builder() {
         let mut mock_builder = MockCpalStreamBuilder::new();
-        mock_builder.expect_build_and_start()
+        mock_builder
+            .expect_build_and_start()
             .times(1)
-            .returning(|_, _| {
-                Ok((Box::new(5), 48000, 2, "f32le"))
-            });
+            .returning(|_, _| Ok((Box::new(5), 48000, 2, "f32le")));
 
         let selection = AudioDeviceSelection {
             name: "Test".to_string(),
@@ -984,7 +1004,7 @@ mod tests {
             is_output: false,
         };
         let (tx, _rx) = audio_chunk_channel();
-        
+
         let res = mock_builder.build_and_start(&selection, tx);
         assert!(res.is_ok());
         let (_, rate, channels, fmt) = res.unwrap();
@@ -1003,7 +1023,7 @@ mod tests {
     #[tokio::test]
     async fn test_start_recording_inner_already_recording() {
         let state = AudioState::default();
-        
+
         let mut cmd = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
         if cfg!(windows) {
             cmd.args(["/c", "timeout 10"]);
@@ -1011,7 +1031,7 @@ mod tests {
             cmd.arg("10");
         }
         let child = cmd.spawn().unwrap();
-            
+
         {
             let mut guard = state.session.lock().unwrap();
             *guard = Some(RecordingSession {
@@ -1020,17 +1040,18 @@ mod tests {
                 _streams: vec![],
             });
         }
-        
+
         let res = start_recording_inner(
             &state,
             "ffmpeg".to_string(),
             "out.ogg".to_string(),
             Some("out.log".to_string()),
             Some(vec![]),
-        ).await;
-        
+        )
+        .await;
+
         assert_eq!(res.unwrap_err(), "Recording is already in progress");
-        
+
         let mut guard = state.session.lock().unwrap();
         let mut session = guard.take().unwrap();
         let _ = session.process.kill();
@@ -1051,13 +1072,12 @@ mod tests {
     #[tokio::test]
     async fn test_start_recording_inner_success() {
         let mut mock_builder = MockCpalStreamBuilder::new();
-        
+
         #[cfg(not(target_os = "linux"))]
-        mock_builder.expect_build_and_start()
+        mock_builder
+            .expect_build_and_start()
             .times(1)
-            .returning(|_, _| {
-                Ok((Box::new(5), 48000, 2, "f32le"))
-            });
+            .returning(|_, _| Ok((Box::new(5), 48000, 2, "f32le")));
 
         #[cfg(target_os = "linux")]
         mock_builder.expect_build_and_start().times(0);
@@ -1095,7 +1115,7 @@ mod tests {
         let logs_dir = epi_lib.join("Logs");
         std::fs::create_dir_all(&rec_dir).unwrap();
         std::fs::create_dir_all(&logs_dir).unwrap();
-        
+
         let out_path = rec_dir.join("test_out.ogg").to_string_lossy().to_string();
         let log_path = logs_dir.join("test_log.log").to_string_lossy().to_string();
 
@@ -1111,7 +1131,8 @@ mod tests {
             out_path,
             Some(log_path),
             Some(vec![device]),
-        ).await;
+        )
+        .await;
 
         assert!(res.is_ok());
 

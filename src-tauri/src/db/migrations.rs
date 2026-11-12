@@ -193,8 +193,22 @@ mod tests {
         let conn = fresh();
         assert_eq!(schema_version(&conn).unwrap(), LATEST_VERSION);
 
-        let names: Vec<String> = columns(&conn, "Recordings").into_iter().map(|c| c.0).collect();
-        assert_eq!(names, ["id", "filename", "duration", "timestamp", "group_id", "label", "tags"]);
+        let names: Vec<String> = columns(&conn, "Recordings")
+            .into_iter()
+            .map(|c| c.0)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "id",
+                "filename",
+                "duration",
+                "timestamp",
+                "group_id",
+                "label",
+                "tags"
+            ]
+        );
         let tags = columns(&conn, "Recordings").pop().unwrap();
         assert_eq!(tags, ("tags".into(), "TEXT".into(), Some("'[]'".into())));
 
@@ -224,8 +238,11 @@ mod tests {
     #[test]
     fn test_rerun_is_idempotent() {
         let mut conn = fresh();
-        conn.execute("INSERT INTO Recordings (filename, duration, label) VALUES ('a.ogg', 1, 'L')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO Recordings (filename, duration, label) VALUES ('a.ogg', 1, 'L')",
+            [],
+        )
+        .unwrap();
         let before = schema_objects(&conn);
 
         // Force migration 1 to run again on an already migrated database.
@@ -235,7 +252,9 @@ mod tests {
 
         assert_eq!(schema_objects(&conn), before);
         assert_eq!(schema_version(&conn).unwrap(), LATEST_VERSION);
-        let label: String = conn.query_row("SELECT label FROM Recordings", [], |r| r.get(0)).unwrap();
+        let label: String = conn
+            .query_row("SELECT label FROM Recordings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(label, "L");
     }
 
@@ -285,7 +304,9 @@ mod tests {
 
         run_migrations(&mut conn).unwrap();
 
-        let tags: String = conn.query_row("SELECT tags FROM Recordings", [], |r| r.get(0)).unwrap();
+        let tags: String = conn
+            .query_row("SELECT tags FROM Recordings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(tags, "[\"x\"]");
         assert_eq!(schema_version(&conn).unwrap(), LATEST_VERSION);
     }
@@ -293,7 +314,8 @@ mod tests {
     #[test]
     fn test_newer_schema_version_is_left_alone() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", LATEST_VERSION + 5).unwrap();
+        conn.pragma_update(None, "user_version", LATEST_VERSION + 5)
+            .unwrap();
         run_migrations(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), LATEST_VERSION + 5);
         assert!(schema_objects(&conn).is_empty());
@@ -311,7 +333,11 @@ mod tests {
         )
         .unwrap();
         let remaining: i64 = conn
-            .query_row("SELECT (SELECT COUNT(*) FROM Transcripts) + (SELECT COUNT(*) FROM Summaries)", [], |r| r.get(0))
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM Transcripts) + (SELECT COUNT(*) FROM Summaries)",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(remaining, 0);
     }

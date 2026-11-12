@@ -58,10 +58,14 @@ pub trait AudioHost {
 pub struct CpalHostImpl;
 impl AudioHost for CpalHostImpl {
     fn default_input_device_name(&self) -> Option<String> {
-        cpal::default_host().default_input_device().map(|d| get_device_name(&d))
+        cpal::default_host()
+            .default_input_device()
+            .map(|d| get_device_name(&d))
     }
     fn default_output_device_name(&self) -> Option<String> {
-        cpal::default_host().default_output_device().map(|d| get_device_name(&d))
+        cpal::default_host()
+            .default_output_device()
+            .map(|d| get_device_name(&d))
     }
     fn input_device_names(&self) -> Result<Vec<String>, String> {
         let host = cpal::default_host();
@@ -125,7 +129,7 @@ pub fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
 pub(crate) fn get_match_score(cpal_name: &str, description: &str, properties: &[String]) -> i32 {
     let cpal_lower = cpal_name.to_lowercase();
     let desc_lower = description.to_lowercase();
-    
+
     if desc_lower.contains(&cpal_lower) || cpal_lower.contains(&desc_lower) {
         return 1000;
     }
@@ -160,16 +164,14 @@ pub(crate) fn parse_pactl_output(stdout: &str, cpal_name: &str, is_output: bool)
     let mut current_name = String::new();
     let mut properties = Vec::new();
     let mut description = String::new();
-    
+
     let mut best_name = String::new();
     let mut best_score = -1;
 
     for line in stdout.lines() {
         let line_trimmed = line.trim();
         if let Some(stripped) = line_trimmed.strip_prefix("Name: ") {
-            if !current_name.is_empty() 
-                && (is_output || !current_name.ends_with(".monitor"))
-            {
+            if !current_name.is_empty() && (is_output || !current_name.ends_with(".monitor")) {
                 let score = get_match_score(cpal_name, &description, &properties);
                 if score > best_score {
                     best_score = score;
@@ -185,16 +187,14 @@ pub(crate) fn parse_pactl_output(stdout: &str, cpal_name: &str, is_output: bool)
             properties.push(line_trimmed.to_string());
         }
     }
-    if !current_name.is_empty() 
-        && (is_output || !current_name.ends_with(".monitor"))
-    {
+    if !current_name.is_empty() && (is_output || !current_name.ends_with(".monitor")) {
         let score = get_match_score(cpal_name, &description, &properties);
         if score > best_score {
             best_score = score;
             best_name = current_name.clone();
         }
     }
-    
+
     if best_score > 0 && !best_name.is_empty() {
         Some(best_name)
     } else {
@@ -208,12 +208,16 @@ pub(crate) fn parse_pactl_output(stdout: &str, cpal_name: &str, is_output: bool)
 #[cfg(target_os = "linux")]
 pub(crate) fn resolve_pulse_device(cpal_name: &str, is_output: bool) -> String {
     let clean_name = cpal_name.trim();
-    if clean_name == "Default Audio Device" 
-        || clean_name == "PulseAudio Sound Server" 
-        || clean_name == "PipeWire Sound Server" 
-        || clean_name == "default" 
+    if clean_name == "Default Audio Device"
+        || clean_name == "PulseAudio Sound Server"
+        || clean_name == "PipeWire Sound Server"
+        || clean_name == "default"
     {
-        let cmd_arg = if is_output { "get-default-sink" } else { "get-default-source" };
+        let cmd_arg = if is_output {
+            "get-default-sink"
+        } else {
+            "get-default-source"
+        };
         if let Ok(output) = std::process::Command::new("pactl").arg(cmd_arg).output() {
             if output.status.success() {
                 let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -226,7 +230,11 @@ pub(crate) fn resolve_pulse_device(cpal_name: &str, is_output: bool) -> String {
     }
 
     let sub_arg = if is_output { "sinks" } else { "sources" };
-    if let Ok(output) = std::process::Command::new("pactl").arg("list").arg(sub_arg).output() {
+    if let Ok(output) = std::process::Command::new("pactl")
+        .arg("list")
+        .arg(sub_arg)
+        .output()
+    {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(best_name) = parse_pactl_output(&stdout, cpal_name, is_output) {
@@ -246,18 +254,22 @@ mod tests {
     fn test_get_audio_devices_inner_default_logic() {
         let mut mock_host = MockAudioHost::new();
 
-        mock_host.expect_default_input_device_name()
+        mock_host
+            .expect_default_input_device_name()
             .return_const(Some("Mic 1".to_string()));
-        
+
         #[cfg(not(target_os = "macos"))]
-        mock_host.expect_default_output_device_name()
+        mock_host
+            .expect_default_output_device_name()
             .return_const(Some("Speaker 2".to_string()));
 
-        mock_host.expect_input_device_names()
+        mock_host
+            .expect_input_device_names()
             .return_const(Ok(vec!["Mic 1".to_string(), "Mic 2".to_string()]));
 
         #[cfg(not(target_os = "macos"))]
-        mock_host.expect_output_device_names()
+        mock_host
+            .expect_output_device_names()
             .return_const(Ok(vec!["Speaker 1".to_string(), "Speaker 2".to_string()]));
 
         let devices = get_audio_devices_inner(&mock_host).unwrap();
@@ -267,7 +279,10 @@ mod tests {
 
         #[cfg(not(target_os = "macos"))]
         {
-            let default_out = devices.iter().find(|d| d.is_output && d.is_default).unwrap();
+            let default_out = devices
+                .iter()
+                .find(|d| d.is_output && d.is_default)
+                .unwrap();
             assert_eq!(default_out.name, "Speaker 2");
         }
     }
@@ -276,18 +291,22 @@ mod tests {
     fn test_get_audio_devices_inner_no_default_fallback() {
         let mut mock_host = MockAudioHost::new();
 
-        mock_host.expect_default_input_device_name()
-            .return_const(None);
-        
-        #[cfg(not(target_os = "macos"))]
-        mock_host.expect_default_output_device_name()
+        mock_host
+            .expect_default_input_device_name()
             .return_const(None);
 
-        mock_host.expect_input_device_names()
+        #[cfg(not(target_os = "macos"))]
+        mock_host
+            .expect_default_output_device_name()
+            .return_const(None);
+
+        mock_host
+            .expect_input_device_names()
             .return_const(Ok(vec!["Mic 1".to_string()]));
 
         #[cfg(not(target_os = "macos"))]
-        mock_host.expect_output_device_names()
+        mock_host
+            .expect_output_device_names()
             .return_const(Ok(vec!["Speaker 1".to_string()]));
 
         let devices = get_audio_devices_inner(&mock_host).unwrap();
@@ -299,10 +318,20 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn test_get_match_score() {
-        assert_eq!(get_match_score("Built-in Audio", "Built-in Audio", &[]), 1000);
-        assert_eq!(get_match_score("Built-in Audio", "built-in audio monitor", &[]), 1000);
+        assert_eq!(
+            get_match_score("Built-in Audio", "Built-in Audio", &[]),
+            1000
+        );
+        assert_eq!(
+            get_match_score("Built-in Audio", "built-in audio monitor", &[]),
+            1000
+        );
 
-        let score = get_match_score("Logitech Headset", "USB Audio Device", &["Logitech Headset".to_string()]);
+        let score = get_match_score(
+            "Logitech Headset",
+            "USB Audio Device",
+            &["Logitech Headset".to_string()],
+        );
         assert!(score > 0);
 
         assert_eq!(get_match_score("Microphone", "Speakers", &[]), 0);

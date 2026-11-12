@@ -35,7 +35,12 @@ pub fn get_stats(conn: &Connection) -> rusqlite::Result<Stats> {
     conn.query_row(
         "SELECT (SELECT COUNT(*) FROM Recordings), (SELECT COUNT(*) FROM Transcripts)",
         [],
-        |row| Ok(Stats { recordings_count: row.get(0)?, transcripts_count: row.get(1)? }),
+        |row| {
+            Ok(Stats {
+                recordings_count: row.get(0)?,
+                transcripts_count: row.get(1)?,
+            })
+        },
     )
 }
 
@@ -52,12 +57,24 @@ mod tests {
     #[test]
     fn test_get_stats_counts_rows() {
         let mut conn = open_in_memory();
-        assert_eq!(get_stats(&conn).unwrap(), Stats { recordings_count: 0, transcripts_count: 0 });
+        assert_eq!(
+            get_stats(&conn).unwrap(),
+            Stats {
+                recordings_count: 0,
+                transcripts_count: 0
+            }
+        );
         let a = save_recording(&conn, "a.ogg", 1.0, None, None).unwrap();
         save_recording(&conn, "b.ogg", 1.0, None, None).unwrap();
         save_transcript(&mut conn, a, "t").unwrap();
         let stats = get_stats(&conn).unwrap();
-        assert_eq!(stats, Stats { recordings_count: 2, transcripts_count: 1 });
+        assert_eq!(
+            stats,
+            Stats {
+                recordings_count: 2,
+                transcripts_count: 1
+            }
+        );
         assert_eq!(
             serde_json::to_value(&stats).unwrap(),
             serde_json::json!({"recordingsCount": 2, "transcriptsCount": 1})

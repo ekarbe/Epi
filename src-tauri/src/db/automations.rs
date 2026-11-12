@@ -85,7 +85,8 @@ pub async fn db_create_automation(
     timerange_hours: f64,
     action: String,
 ) -> Result<i64, String> {
-    db.run(move |c| create_automation(c, &name, &trigger_time, timerange_hours, &action)).await
+    db.run(move |c| create_automation(c, &name, &trigger_time, timerange_hours, &action))
+        .await
 }
 
 #[tauri::command]
@@ -121,7 +122,13 @@ mod tests {
 
     #[test]
     fn test_serialized_field_names_match_frontend_types() {
-        let a = Automation { id: 1, name: "n".into(), trigger_time: "08:00".into(), timerange_hours: 24.0, action: "x".into() };
+        let a = Automation {
+            id: 1,
+            name: "n".into(),
+            trigger_time: "08:00".into(),
+            timerange_hours: 24.0,
+            action: "x".into(),
+        };
         assert_eq!(
             serde_json::to_value(&a).unwrap(),
             serde_json::json!({"id": 1, "name": "n", "triggerTime": "08:00", "timerangeHours": 24.0, "action": "x"})

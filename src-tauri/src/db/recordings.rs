@@ -125,7 +125,10 @@ pub fn get_library_recordings(conn: &Connection) -> rusqlite::Result<Vec<Library
 }
 
 /// A single library recording (without tags), or `None`.
-pub fn get_library_recording_by_id(conn: &Connection, id: i64) -> rusqlite::Result<Option<LibraryRecording>> {
+pub fn get_library_recording_by_id(
+    conn: &Connection,
+    id: i64,
+) -> rusqlite::Result<Option<LibraryRecording>> {
     let sql = format!(
         "SELECT {LIBRARY_COLUMNS}
          FROM Recordings r
@@ -144,7 +147,12 @@ pub fn delete_recording(conn: &Connection, id: i64) -> rusqlite::Result<()> {
 }
 
 /// Updates a recording's file name and label.
-pub fn update_recording(conn: &Connection, id: i64, filename: &str, label: Option<&str>) -> rusqlite::Result<()> {
+pub fn update_recording(
+    conn: &Connection,
+    id: i64,
+    filename: &str,
+    label: Option<&str>,
+) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE Recordings SET filename = ?1, label = ?2 WHERE id = ?3",
         params![filename, label, id],
@@ -183,7 +191,9 @@ fn legacy_group_id(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<i64>> {
 }
 
 /// Recordings whose timestamp is more than 30 days in the past (without tags).
-pub fn get_recordings_older_than_30_days(conn: &Connection) -> rusqlite::Result<Vec<LibraryRecording>> {
+pub fn get_recordings_older_than_30_days(
+    conn: &Connection,
+) -> rusqlite::Result<Vec<LibraryRecording>> {
     let sql = format!(
         "SELECT {LIBRARY_COLUMNS}
          FROM Recordings r
@@ -198,7 +208,10 @@ pub fn get_recordings_older_than_30_days(conn: &Connection) -> rusqlite::Result<
 
 /// Replaces a recording's tag list.
 pub fn update_recording_tags(conn: &Connection, id: i64, tags: &[String]) -> rusqlite::Result<()> {
-    conn.execute("UPDATE Recordings SET tags = ?1 WHERE id = ?2", params![encode_tags(tags), id])?;
+    conn.execute(
+        "UPDATE Recordings SET tags = ?1 WHERE id = ?2",
+        params![encode_tags(tags), id],
+    )?;
     Ok(())
 }
 
@@ -210,8 +223,16 @@ pub async fn db_save_recording(
     label: Option<String>,
     timestamp: Option<String>,
 ) -> Result<i64, String> {
-    db.run(move |c| save_recording(c, &filename, duration, label.as_deref(), timestamp.as_deref()))
-        .await
+    db.run(move |c| {
+        save_recording(
+            c,
+            &filename,
+            duration,
+            label.as_deref(),
+            timestamp.as_deref(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -220,7 +241,10 @@ pub async fn db_get_library_recordings(db: State<'_, Db>) -> Result<Vec<LibraryR
 }
 
 #[tauri::command]
-pub async fn db_get_library_recording_by_id(db: State<'_, Db>, id: i64) -> Result<Option<LibraryRecording>, String> {
+pub async fn db_get_library_recording_by_id(
+    db: State<'_, Db>,
+    id: i64,
+) -> Result<Option<LibraryRecording>, String> {
     db.run(move |c| get_library_recording_by_id(c, id)).await
 }
 
@@ -236,21 +260,31 @@ pub async fn db_update_recording(
     filename: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    db.run(move |c| update_recording(c, id, &filename, label.as_deref())).await
+    db.run(move |c| update_recording(c, id, &filename, label.as_deref()))
+        .await
 }
 
 #[tauri::command]
-pub async fn db_get_raw_recording_by_id(db: State<'_, Db>, id: i64) -> Result<Option<Recording>, String> {
+pub async fn db_get_raw_recording_by_id(
+    db: State<'_, Db>,
+    id: i64,
+) -> Result<Option<Recording>, String> {
     db.run(move |c| get_raw_recording_by_id(c, id)).await
 }
 
 #[tauri::command]
-pub async fn db_get_recordings_older_than_30_days(db: State<'_, Db>) -> Result<Vec<LibraryRecording>, String> {
+pub async fn db_get_recordings_older_than_30_days(
+    db: State<'_, Db>,
+) -> Result<Vec<LibraryRecording>, String> {
     db.run(|c| get_recordings_older_than_30_days(c)).await
 }
 
 #[tauri::command]
-pub async fn db_update_recording_tags(db: State<'_, Db>, id: i64, tags: Vec<String>) -> Result<(), String> {
+pub async fn db_update_recording_tags(
+    db: State<'_, Db>,
+    id: i64,
+    tags: Vec<String>,
+) -> Result<(), String> {
     db.run(move |c| update_recording_tags(c, id, &tags)).await
 }
 
@@ -262,7 +296,14 @@ mod tests {
     #[test]
     fn test_save_recording_with_and_without_timestamp() {
         let conn = open_in_memory();
-        let a = save_recording(&conn, "a.ogg", 12.0, Some("Meeting"), Some("2026-07-08 12:00:00")).unwrap();
+        let a = save_recording(
+            &conn,
+            "a.ogg",
+            12.0,
+            Some("Meeting"),
+            Some("2026-07-08 12:00:00"),
+        )
+        .unwrap();
         let b = save_recording(&conn, "b.ogg", 3.5, None, None).unwrap();
         let c = save_recording(&conn, "c.ogg", 4.0, None, Some("")).unwrap();
         assert_eq!((a, b, c), (1, 2, 3));
@@ -282,26 +323,51 @@ mod tests {
         let rec_b = get_raw_recording_by_id(&conn, b).unwrap().unwrap();
         assert_eq!(rec_b.duration, 3.5);
         assert!(rec_b.timestamp.is_some(), "default timestamp must be set");
-        assert!(get_raw_recording_by_id(&conn, c).unwrap().unwrap().timestamp.is_some());
-        let tags: String = conn.query_row("SELECT tags FROM Recordings WHERE id = 2", [], |r| r.get(0)).unwrap();
+        assert!(get_raw_recording_by_id(&conn, c)
+            .unwrap()
+            .unwrap()
+            .timestamp
+            .is_some());
+        let tags: String = conn
+            .query_row("SELECT tags FROM Recordings WHERE id = 2", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(tags, "[]");
     }
 
     #[test]
     fn test_get_library_recordings_orders_and_flags_transcripts() {
         let conn = open_in_memory();
-        let old = save_recording(&conn, "old.ogg", 1.0, Some("Old"), Some("2026-01-01 00:00:00")).unwrap();
+        let old = save_recording(
+            &conn,
+            "old.ogg",
+            1.0,
+            Some("Old"),
+            Some("2026-01-01 00:00:00"),
+        )
+        .unwrap();
         let new = save_recording(&conn, "new.ogg", 2.0, None, Some("2026-02-01 00:00:00")).unwrap();
-        conn.execute("INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 'a')", [old]).unwrap();
-        conn.execute("INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 'b')", [old]).unwrap();
+        conn.execute(
+            "INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 'a')",
+            [old],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 'b')",
+            [old],
+        )
+        .unwrap();
         update_recording_tags(&conn, new, &["urgent".into(), "sync".into()]).unwrap();
-        conn.execute("UPDATE Recordings SET tags = NULL WHERE id = ?1", [old]).unwrap();
+        conn.execute("UPDATE Recordings SET tags = NULL WHERE id = ?1", [old])
+            .unwrap();
 
         let list = get_library_recordings(&conn).unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, new);
         assert!(!list[0].has_transcript);
-        assert_eq!(list[0].tags, Some(vec!["urgent".to_string(), "sync".to_string()]));
+        assert_eq!(
+            list[0].tags,
+            Some(vec!["urgent".to_string(), "sync".to_string()])
+        );
         assert_eq!(list[1].id, old);
         assert!(list[1].has_transcript);
         assert_eq!(list[1].label.as_deref(), Some("Old"));
@@ -323,8 +389,16 @@ mod tests {
     fn test_update_and_delete_recording() {
         let conn = open_in_memory();
         let id = save_recording(&conn, "a.ogg", 1.0, Some("L"), None).unwrap();
-        conn.execute("INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 't')", [id]).unwrap();
-        conn.execute("INSERT INTO Summaries (transcript_id, summary_text) VALUES (1, 's')", []).unwrap();
+        conn.execute(
+            "INSERT INTO Transcripts (recording_id, text_content) VALUES (?1, 't')",
+            [id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO Summaries (transcript_id, summary_text) VALUES (1, 's')",
+            [],
+        )
+        .unwrap();
 
         update_recording(&conn, id, "b.ogg", None).unwrap();
         let rec = get_raw_recording_by_id(&conn, id).unwrap().unwrap();
@@ -333,7 +407,11 @@ mod tests {
         delete_recording(&conn, id).unwrap();
         assert!(get_raw_recording_by_id(&conn, id).unwrap().is_none());
         let left: i64 = conn
-            .query_row("SELECT (SELECT COUNT(*) FROM Transcripts) + (SELECT COUNT(*) FROM Summaries)", [], |r| r.get(0))
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM Transcripts) + (SELECT COUNT(*) FROM Summaries)",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(left, 0);
     }
@@ -342,10 +420,27 @@ mod tests {
     fn test_get_raw_recording_tolerates_text_in_legacy_group_id() {
         let conn = open_in_memory();
         let id = save_recording(&conn, "a.ogg", 1.0, None, None).unwrap();
-        conn.execute("UPDATE Recordings SET group_id = 'Weekly' WHERE id = ?1", [id]).unwrap();
-        assert_eq!(get_raw_recording_by_id(&conn, id).unwrap().unwrap().group_id, None);
-        conn.execute("UPDATE Recordings SET group_id = 4 WHERE id = ?1", [id]).unwrap();
-        assert_eq!(get_raw_recording_by_id(&conn, id).unwrap().unwrap().group_id, Some(4));
+        conn.execute(
+            "UPDATE Recordings SET group_id = 'Weekly' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        assert_eq!(
+            get_raw_recording_by_id(&conn, id)
+                .unwrap()
+                .unwrap()
+                .group_id,
+            None
+        );
+        conn.execute("UPDATE Recordings SET group_id = 4 WHERE id = ?1", [id])
+            .unwrap();
+        assert_eq!(
+            get_raw_recording_by_id(&conn, id)
+                .unwrap()
+                .unwrap()
+                .group_id,
+            Some(4)
+        );
     }
 
     #[test]
@@ -383,7 +478,14 @@ mod tests {
             json,
             serde_json::json!({"id": 1, "filename": "a", "duration": 2.0, "timestamp": "t", "label": null, "hasTranscript": true})
         );
-        let raw = Recording { id: 1, filename: "a".into(), duration: 2.0, timestamp: None, group_id: Some(3), label: None };
+        let raw = Recording {
+            id: 1,
+            filename: "a".into(),
+            duration: 2.0,
+            timestamp: None,
+            group_id: Some(3),
+            label: None,
+        };
         assert_eq!(serde_json::to_value(&raw).unwrap()["groupId"], 3);
     }
 }

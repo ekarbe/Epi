@@ -32,7 +32,11 @@ pub struct SummaryText {
 
 /// Stores the summary of a transcript, updating the existing one if there is
 /// one. Returns the summary id.
-pub fn save_summary(conn: &mut Connection, transcript_id: i64, summary_text: &str) -> rusqlite::Result<i64> {
+pub fn save_summary(
+    conn: &mut Connection,
+    transcript_id: i64,
+    summary_text: &str,
+) -> rusqlite::Result<i64> {
     let tx = conn.transaction()?;
     let id = match get_summary_for_transcript(&tx, transcript_id)? {
         Some(existing) => {
@@ -53,27 +57,47 @@ pub fn save_summary(conn: &mut Connection, transcript_id: i64, summary_text: &st
 
 /// Replaces the text of a summary.
 pub fn update_summary(conn: &Connection, id: i64, summary_text: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE Summaries SET summary_text = ?1 WHERE id = ?2", params![summary_text, id])?;
+    conn.execute(
+        "UPDATE Summaries SET summary_text = ?1 WHERE id = ?2",
+        params![summary_text, id],
+    )?;
     Ok(())
 }
 
 /// The (first) summary of a transcript, or `None`.
-pub fn get_summary_for_transcript(conn: &Connection, transcript_id: i64) -> rusqlite::Result<Option<SummaryText>> {
+pub fn get_summary_for_transcript(
+    conn: &Connection,
+    transcript_id: i64,
+) -> rusqlite::Result<Option<SummaryText>> {
     conn.query_row(
         "SELECT id, summary_text FROM Summaries WHERE transcript_id = ?1 ORDER BY id ASC LIMIT 1",
         [transcript_id],
-        |row| Ok(SummaryText { id: row.get(0)?, summary_text: row.get(1)? }),
+        |row| {
+            Ok(SummaryText {
+                id: row.get(0)?,
+                summary_text: row.get(1)?,
+            })
+        },
     )
     .optional()
 }
 
 #[tauri::command]
-pub async fn db_save_summary(db: State<'_, Db>, transcript_id: i64, summary_text: String) -> Result<i64, String> {
-    db.run(move |c| save_summary(c, transcript_id, &summary_text)).await
+pub async fn db_save_summary(
+    db: State<'_, Db>,
+    transcript_id: i64,
+    summary_text: String,
+) -> Result<i64, String> {
+    db.run(move |c| save_summary(c, transcript_id, &summary_text))
+        .await
 }
 
 #[tauri::command]
-pub async fn db_update_summary(db: State<'_, Db>, id: i64, summary_text: String) -> Result<(), String> {
+pub async fn db_update_summary(
+    db: State<'_, Db>,
+    id: i64,
+    summary_text: String,
+) -> Result<(), String> {
     db.run(move |c| update_summary(c, id, &summary_text)).await
 }
 
@@ -82,7 +106,8 @@ pub async fn db_get_summary_for_transcript(
     db: State<'_, Db>,
     transcript_id: i64,
 ) -> Result<Option<SummaryText>, String> {
-    db.run(move |c| get_summary_for_transcript(c, transcript_id)).await
+    db.run(move |c| get_summary_for_transcript(c, transcript_id))
+        .await
 }
 
 #[cfg(test)]
@@ -105,7 +130,10 @@ mod tests {
         assert_eq!(save_summary(&mut conn, t, "second").unwrap(), id);
         assert_eq!(
             get_summary_for_transcript(&conn, t).unwrap(),
-            Some(SummaryText { id, summary_text: "second".into() })
+            Some(SummaryText {
+                id,
+                summary_text: "second".into()
+            })
         );
     }
 
@@ -115,12 +143,24 @@ mod tests {
         let t = transcript(&mut conn);
         let id = save_summary(&mut conn, t, "old").unwrap();
         update_summary(&conn, id, "new").unwrap();
-        assert_eq!(get_summary_for_transcript(&conn, t).unwrap().unwrap().summary_text, "new");
+        assert_eq!(
+            get_summary_for_transcript(&conn, t)
+                .unwrap()
+                .unwrap()
+                .summary_text,
+            "new"
+        );
     }
 
     #[test]
     fn test_serialized_field_names_match_frontend_types() {
-        let s = SummaryText { id: 1, summary_text: "x".into() };
-        assert_eq!(serde_json::to_value(&s).unwrap(), serde_json::json!({"id": 1, "summaryText": "x"}));
+        let s = SummaryText {
+            id: 1,
+            summary_text: "x".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&s).unwrap(),
+            serde_json::json!({"id": 1, "summaryText": "x"})
+        );
     }
 }

@@ -15,11 +15,11 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use tauri::Emitter;
-use tauri::{AppHandle, Window, Manager};
-use std::process::Command;
 use crate::utils::validate_model_name;
-use crate::whisperx::env::{get_hf_cache_dir, get_env_path, get_python_path};
+use crate::whisperx::env::{get_env_path, get_hf_cache_dir, get_python_path};
+use std::process::Command;
+use tauri::Emitter;
+use tauri::{AppHandle, Manager, Window};
 
 pub fn extract_model_from_dir_name(dir_name: &str) -> Option<String> {
     if dir_name.starts_with("models--Systran--faster-whisper-") {
@@ -61,7 +61,7 @@ pub fn get_downloaded_models() -> Result<Vec<String>, String> {
             }
         }
     }
-    
+
     Ok(models)
 }
 
@@ -79,10 +79,14 @@ pub fn get_downloaded_models() -> Result<Vec<String>, String> {
 /// * Spawns a python script that loads the model, causing it to download.
 /// * Emits `whisperx-model-log` events to the frontend.
 #[tauri::command]
-pub async fn download_model(app_handle: AppHandle, window: Window, model: String) -> Result<(), String> {
+pub async fn download_model(
+    app_handle: AppHandle,
+    window: Window,
+    model: String,
+) -> Result<(), String> {
     validate_model_name(&model)?;
     let env_path = get_env_path(&app_handle)?;
-    
+
     let python_bin = get_python_path(&env_path);
     if !python_bin.exists() {
         return Err("WhisperX environment not found. Please install the engine first.".into());
@@ -92,19 +96,22 @@ pub async fn download_model(app_handle: AppHandle, window: Window, model: String
         let _ = window.emit("whisperx-model-log", msg.to_string());
     };
 
-    emit_log(&format!("Downloading model '{}' (this may take a few minutes)...", model));
-    
+    emit_log(&format!(
+        "Downloading model '{}' (this may take a few minutes)...",
+        model
+    ));
+
     let download_script = build_download_script(&model);
 
     let mut cmd = Command::new(&python_bin);
     cmd.arg("-c").arg(&download_script);
-    
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
-    
+
     let app_handle_clone = app_handle.clone();
     let output = tokio::task::spawn_blocking(move || {
         let registry = app_handle_clone.state::<crate::process_manager::ProcessRegistry>();
@@ -119,7 +126,10 @@ pub async fn download_model(app_handle: AppHandle, window: Window, model: String
         return Err(format!("Failed to download model '{}'", model));
     }
 
-    emit_log(&format!("Successfully downloaded and cached model '{}'", model));
+    emit_log(&format!(
+        "Successfully downloaded and cached model '{}'",
+        model
+    ));
     Ok(())
 }
 
@@ -139,9 +149,10 @@ pub fn delete_model(model: String) -> Result<(), String> {
     let cache_dir = get_hf_cache_dir()?.join(format!("models--Systran--faster-whisper-{}", model));
 
     if cache_dir.exists() {
-        std::fs::remove_dir_all(cache_dir).map_err(|e| format!("Failed to delete model cache: {}", e))?;
+        std::fs::remove_dir_all(cache_dir)
+            .map_err(|e| format!("Failed to delete model cache: {}", e))?;
     }
-    
+
     Ok(())
 }
 
@@ -151,8 +162,14 @@ mod tests {
 
     #[test]
     fn test_extract_model_from_dir_name() {
-        assert_eq!(extract_model_from_dir_name("models--Systran--faster-whisper-base.en").unwrap(), "base.en");
-        assert_eq!(extract_model_from_dir_name("models--Systran--faster-whisper-large-v3").unwrap(), "large-v3");
+        assert_eq!(
+            extract_model_from_dir_name("models--Systran--faster-whisper-base.en").unwrap(),
+            "base.en"
+        );
+        assert_eq!(
+            extract_model_from_dir_name("models--Systran--faster-whisper-large-v3").unwrap(),
+            "large-v3"
+        );
         assert!(extract_model_from_dir_name("some-other-dir").is_none());
         assert!(extract_model_from_dir_name("models--SomethingElse").is_none());
     }

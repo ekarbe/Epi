@@ -32,7 +32,12 @@ pub struct GlossaryTerm {
 /// All glossary entries sorted by term.
 pub fn get_glossary(conn: &Connection) -> rusqlite::Result<Vec<GlossaryTerm>> {
     let mut stmt = conn.prepare("SELECT term, meaning FROM Glossary ORDER BY term ASC")?;
-    let rows = stmt.query_map([], |row| Ok(GlossaryTerm { term: row.get(0)?, meaning: row.get(1)? }))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(GlossaryTerm {
+            term: row.get(0)?,
+            meaning: row.get(1)?,
+        })
+    })?;
     rows.collect()
 }
 
@@ -57,8 +62,13 @@ pub async fn db_get_glossary(db: State<'_, Db>) -> Result<Vec<GlossaryTerm>, Str
 }
 
 #[tauri::command]
-pub async fn db_save_glossary_term(db: State<'_, Db>, term: String, meaning: String) -> Result<(), String> {
-    db.run(move |c| save_glossary_term(c, &term, &meaning)).await
+pub async fn db_save_glossary_term(
+    db: State<'_, Db>,
+    term: String,
+    meaning: String,
+) -> Result<(), String> {
+    db.run(move |c| save_glossary_term(c, &term, &meaning))
+        .await
 }
 
 #[tauri::command]
@@ -80,8 +90,14 @@ mod tests {
         assert_eq!(
             get_glossary(&conn).unwrap(),
             vec![
-                GlossaryTerm { term: "FFmpeg".into(), meaning: "media".into() },
-                GlossaryTerm { term: "Tauri".into(), meaning: "framework".into() },
+                GlossaryTerm {
+                    term: "FFmpeg".into(),
+                    meaning: "media".into()
+                },
+                GlossaryTerm {
+                    term: "Tauri".into(),
+                    meaning: "framework".into()
+                },
             ]
         );
         delete_glossary_term(&conn, "FFmpeg").unwrap();

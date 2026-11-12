@@ -15,11 +15,11 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use tauri::{AppHandle, Window, Manager, Emitter};
-use std::process::Command;
+use crate::whisperx::env::{get_binary_path, get_env_path, get_python_path};
 use std::io::{BufRead, BufReader};
+use std::process::Command;
 use std::thread;
-use crate::whisperx::env::{get_env_path, get_binary_path, get_python_path};
+use tauri::{AppHandle, Emitter, Manager, Window};
 
 /// The WhisperX release installed into the managed virtual environment.
 pub const WHISPERX_VERSION: &str = "3.8.6";
@@ -28,7 +28,8 @@ pub const WHISPERX_VERSION: &str = "3.8.6";
 /// (`torch~=2.8.0`, `torchaudio~=2.8.0`, `torchvision~=0.23.0`).
 ///
 /// The `==` specs also match local variants such as `2.8.0+cpu` from the CPU-only index.
-pub const TORCH_REQUIREMENTS: &[&str] = &["torch==2.8.0", "torchvision==0.23.0", "torchaudio==2.8.0"];
+pub const TORCH_REQUIREMENTS: &[&str] =
+    &["torch==2.8.0", "torchvision==0.23.0", "torchaudio==2.8.0"];
 
 /// WhisperX runtime dependencies, pinned to the versions in the upstream `uv.lock`
 /// of the WhisperX 3.8.6 release (plus `sounddevice` for live transcription).
@@ -83,7 +84,7 @@ pub async fn check_whisperx_status(app_handle: AppHandle) -> Result<WhisperXStat
     let env_path = get_env_path(&app_handle)?;
     let bin_path = get_binary_path(&env_path);
     let python_bin = get_python_path(&env_path);
-    
+
     let is_functional = if bin_path.exists() && python_bin.exists() {
         let mut cmd = tokio::process::Command::new(&python_bin);
         #[cfg(target_os = "windows")]
@@ -93,13 +94,11 @@ pub async fn check_whisperx_status(app_handle: AppHandle) -> Result<WhisperXStat
         cmd.args(["-c", "import whisperx"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        
+
         match cmd.spawn() {
             Ok(mut child) => {
-                let status = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    child.wait()
-                ).await;
+                let status =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
                 match status {
                     Ok(Ok(s)) => s.success(),
                     _ => {
@@ -113,7 +112,7 @@ pub async fn check_whisperx_status(app_handle: AppHandle) -> Result<WhisperXStat
     } else {
         false
     };
-    
+
     if is_functional {
         Ok(WhisperXStatus {
             installed: true,
@@ -134,13 +133,13 @@ pub async fn uninstall_whisperx(app_handle: AppHandle) -> Result<(), String> {
             std::fs::remove_dir_all(&env_path).map_err(|e| e.to_string())?;
         }
     }
-    
+
     if let Ok(portable_path) = crate::whisperx::python::get_python_standalone_dir(&app_handle) {
         if portable_path.exists() {
             std::fs::remove_dir_all(&portable_path).map_err(|e| e.to_string())?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -157,7 +156,7 @@ pub async fn check_cuda_support() -> Result<bool, String> {
         .stderr(std::process::Stdio::null())
         .output()
         .await;
-        
+
     match output {
         Ok(out) => Ok(out.status.success()),
         Err(_) => Ok(false),
@@ -182,23 +181,31 @@ pub async fn check_cuda_support() -> Result<bool, String> {
 /// * Downloads ~2GB of packages and models.
 /// * Emits `whisperx-install-log` events to the frontend.
 #[tauri::command]
-pub async fn install_whisperx(app_handle: AppHandle, window: Window, cpu_only: bool) -> Result<(), String> {
+pub async fn install_whisperx(
+    app_handle: AppHandle,
+    window: Window,
+    cpu_only: bool,
+) -> Result<(), String> {
     // The pinned WhisperX/PyTorch set only supports Python 3.10-3.13, so fall back to the
     // portable Python 3.11 when the system interpreter is missing or outside that range.
     let system_python_usable = crate::whisperx::env::resolve_system_python()
         .map(|cmd| crate::whisperx::env::python_version_is_supported(&cmd))
         .unwrap_or(false);
     if !system_python_usable {
-        let portable_path = crate::whisperx::python::get_portable_python_path(&app_handle).unwrap_or_default();
+        let portable_path =
+            crate::whisperx::python::get_portable_python_path(&app_handle).unwrap_or_default();
         if !portable_path.exists() {
-            let _ = window.emit("whisperx-install-log", "No supported system Python (3.10-3.13) found. Installing portable Python...");
+            let _ = window.emit(
+                "whisperx-install-log",
+                "No supported system Python (3.10-3.13) found. Installing portable Python...",
+            );
             crate::whisperx::python::install_portable_python(&app_handle, &window).await?;
         }
     }
 
     tokio::task::spawn_blocking(move || {
         let env_path = get_env_path(&app_handle)?;
-        
+
         // Ensure app data dir exists
         if let Some(parent) = env_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -223,7 +230,7 @@ pub async fn install_whisperx(app_handle: AppHandle, window: Window, cpu_only: b
                 use std::os::windows::process::CommandExt;
                 venv_cmd.creation_flags(0x08000000);
             }
-            
+
             let venv_output = crate::process_manager::run_registered(&registry, venv_cmd)?;
             if !venv_output.status.success() {
                 return Err("Failed to create virtual environment. Ensure python/python3 is installed and in your PATH.".to_string());
@@ -364,15 +371,31 @@ mod tests {
         specs.push(&whisperx_spec);
         for spec in specs {
             let parts: Vec<&str> = spec.split("==").collect();
-            assert_eq!(parts.len(), 2, "requirement is not pinned with '==': {}", spec);
-            assert!(!parts[0].is_empty() && !parts[1].is_empty(), "malformed requirement: {}", spec);
-            assert!(!spec.contains("git+") && !spec.contains("://"), "requirement must come from PyPI: {}", spec);
+            assert_eq!(
+                parts.len(),
+                2,
+                "requirement is not pinned with '==': {}",
+                spec
+            );
+            assert!(
+                !parts[0].is_empty() && !parts[1].is_empty(),
+                "malformed requirement: {}",
+                spec
+            );
+            assert!(
+                !spec.contains("git+") && !spec.contains("://"),
+                "requirement must come from PyPI: {}",
+                spec
+            );
         }
     }
 
     #[test]
     fn test_whisperx_requirement() {
-        assert_eq!(whisperx_requirement(), format!("whisperx=={}", WHISPERX_VERSION));
+        assert_eq!(
+            whisperx_requirement(),
+            format!("whisperx=={}", WHISPERX_VERSION)
+        );
     }
 
     #[test]

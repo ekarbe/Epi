@@ -100,7 +100,11 @@ pub const DEFAULT_PROMPTS: &[(&str, &str)] = &[
 pub fn get_prompts(conn: &Connection) -> rusqlite::Result<Vec<PromptTemplate>> {
     let mut stmt = conn.prepare("SELECT id, title, template_text FROM Prompts ORDER BY id ASC")?;
     let rows = stmt.query_map([], |row| {
-        Ok(PromptTemplate { id: row.get(0)?, title: row.get(1)?, template_text: row.get(2)? })
+        Ok(PromptTemplate {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            template_text: row.get(2)?,
+        })
     })?;
     rows.collect()
 }
@@ -115,7 +119,12 @@ pub fn create_prompt(conn: &Connection, title: &str, template_text: &str) -> rus
 }
 
 /// Updates the title and text of a prompt.
-pub fn update_prompt(conn: &Connection, id: i64, title: &str, template_text: &str) -> rusqlite::Result<()> {
+pub fn update_prompt(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    template_text: &str,
+) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE Prompts SET title = ?1, template_text = ?2 WHERE id = ?3",
         params![title, template_text, id],
@@ -148,13 +157,24 @@ pub async fn db_get_prompts(db: State<'_, Db>) -> Result<Vec<PromptTemplate>, St
 }
 
 #[tauri::command]
-pub async fn db_create_prompt(db: State<'_, Db>, title: String, template_text: String) -> Result<i64, String> {
-    db.run(move |c| create_prompt(c, &title, &template_text)).await
+pub async fn db_create_prompt(
+    db: State<'_, Db>,
+    title: String,
+    template_text: String,
+) -> Result<i64, String> {
+    db.run(move |c| create_prompt(c, &title, &template_text))
+        .await
 }
 
 #[tauri::command]
-pub async fn db_update_prompt(db: State<'_, Db>, id: i64, title: String, template_text: String) -> Result<(), String> {
-    db.run(move |c| update_prompt(c, id, &title, &template_text)).await
+pub async fn db_update_prompt(
+    db: State<'_, Db>,
+    id: i64,
+    title: String,
+    template_text: String,
+) -> Result<(), String> {
+    db.run(move |c| update_prompt(c, id, &title, &template_text))
+        .await
 }
 
 #[tauri::command]
@@ -181,7 +201,11 @@ mod tests {
         delete_prompt(&conn, b).unwrap();
         assert_eq!(
             get_prompts(&conn).unwrap(),
-            vec![PromptTemplate { id: a, title: "A2".into(), template_text: "z".into() }]
+            vec![PromptTemplate {
+                id: a,
+                title: "A2".into(),
+                template_text: "z".into()
+            }]
         );
     }
 
@@ -192,8 +216,13 @@ mod tests {
         ensure_default_prompts(&mut conn).unwrap();
         let prompts = get_prompts(&conn).unwrap();
         let titles: Vec<&str> = prompts.iter().map(|p| p.title.as_str()).collect();
-        assert_eq!(titles, DEFAULT_PROMPTS.iter().map(|p| p.0).collect::<Vec<_>>());
-        assert!(prompts.iter().all(|p| p.template_text.ends_with("Transcript:\n{{transcript}}")));
+        assert_eq!(
+            titles,
+            DEFAULT_PROMPTS.iter().map(|p| p.0).collect::<Vec<_>>()
+        );
+        assert!(prompts
+            .iter()
+            .all(|p| p.template_text.ends_with("Transcript:\n{{transcript}}")));
 
         let mut custom = open_in_memory();
         create_prompt(&custom, "Mine", "t").unwrap();
@@ -203,7 +232,11 @@ mod tests {
 
     #[test]
     fn test_serialized_field_names_match_frontend_types() {
-        let p = PromptTemplate { id: 1, title: "t".into(), template_text: "x".into() };
+        let p = PromptTemplate {
+            id: 1,
+            title: "t".into(),
+            template_text: "x".into(),
+        };
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::json!({"id": 1, "title": "t", "templateText": "x"})

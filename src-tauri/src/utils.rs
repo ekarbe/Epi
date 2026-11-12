@@ -32,8 +32,8 @@ use std::path::{Path, PathBuf};
 ///   or out-of-bounds library folder access is attempted.
 pub fn validate_path_in_library<P: AsRef<Path>>(path: P) -> Result<PathBuf, String> {
     #[cfg(not(test))]
-    let docs_dir = dirs::document_dir()
-        .ok_or_else(|| "Could not find documents directory".to_string())?;
+    let docs_dir =
+        dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
 
     #[cfg(test)]
     let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
@@ -54,7 +54,10 @@ pub fn validate_path_in_library<P: AsRef<Path>>(path: P) -> Result<PathBuf, Stri
 /// # Returns
 /// * `Result<PathBuf, String>` - The absolute, normalized path within the library on success,
 ///   or an error description if traversal or escape is detected.
-pub fn validate_path_in_dir<P: AsRef<Path>>(path: P, library_dir: &Path) -> Result<PathBuf, String> {
+pub fn validate_path_in_dir<P: AsRef<Path>>(
+    path: P,
+    library_dir: &Path,
+) -> Result<PathBuf, String> {
     let path = path.as_ref();
 
     // Resolve target path absolute representation
@@ -116,7 +119,10 @@ pub fn validate_model_name(model: &str) -> Result<(), String> {
     }
     // Prevent path traversal sequences
     if model.contains("..") || model.starts_with('/') || model.ends_with('/') {
-        return Err("Model name cannot contain path traversal sequences or start/end with a slash.".to_string());
+        return Err(
+            "Model name cannot contain path traversal sequences or start/end with a slash."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -174,8 +180,15 @@ fn recording_stem(filename: &str) -> Result<&str, String> {
 ///
 /// # Side Effects
 /// * Deletes the specified file from the filesystem if validation succeeds and the file exists.
-pub fn delete_library_subfile(library_dir: &Path, base_name: &str, subdir: &str, suffix: &str) -> Result<(), String> {
-    let path = library_dir.join(subdir).join(format!("{}{}", base_name, suffix));
+pub fn delete_library_subfile(
+    library_dir: &Path,
+    base_name: &str,
+    subdir: &str,
+    suffix: &str,
+) -> Result<(), String> {
+    let path = library_dir
+        .join(subdir)
+        .join(format!("{}{}", base_name, suffix));
     let p = validate_path_in_dir(path, library_dir)?;
     remove_file_if_exists(&p)
 }
@@ -190,7 +203,9 @@ pub fn delete_sidecar_files_in(library_dir: &Path, filename: &str) -> Result<(),
     let base = recording_stem(filename)?;
     let errors = RECORDING_SIDECAR_FILES
         .iter()
-        .filter_map(|(subdir, suffix)| delete_library_subfile(library_dir, base, subdir, suffix).err())
+        .filter_map(|(subdir, suffix)| {
+            delete_library_subfile(library_dir, base, subdir, suffix).err()
+        })
         .collect();
     aggregate_errors(errors)
 }
@@ -198,7 +213,8 @@ pub fn delete_sidecar_files_in(library_dir: &Path, filename: &str) -> Result<(),
 /// Deletes the OGG audio file of a recording from the `Recordings` directory.
 /// A missing file is not an error.
 pub fn delete_audio_file_in(library_dir: &Path, filename: &str) -> Result<(), String> {
-    let audio_file = validate_path_in_dir(library_dir.join("Recordings").join(filename), library_dir)?;
+    let audio_file =
+        validate_path_in_dir(library_dir.join("Recordings").join(filename), library_dir)?;
     remove_file_if_exists(&audio_file)
 }
 
@@ -233,13 +249,24 @@ pub fn delete_recording_files_in(library_dir: &Path, filename: &str) -> Result<(
 /// * `library_dir` - The path to the Epi Library directory.
 /// * `old_filename` - The current name of the recording OGG file.
 /// * `new_filename` - The target name of the recording OGG file.
-pub fn rename_recording_files_in(library_dir: &Path, old_filename: &str, new_filename: &str) -> Result<(), String> {
-    rename_recording_files_with(library_dir, old_filename, new_filename, |from, to| std::fs::rename(from, to))
+pub fn rename_recording_files_in(
+    library_dir: &Path,
+    old_filename: &str,
+    new_filename: &str,
+) -> Result<(), String> {
+    rename_recording_files_with(library_dir, old_filename, new_filename, |from, to| {
+        std::fs::rename(from, to)
+    })
 }
 
 /// Implementation of [`rename_recording_files_in`] with an injectable rename function,
 /// so that rename failures and the rollback path can be exercised in tests.
-fn rename_recording_files_with<F>(library_dir: &Path, old_filename: &str, new_filename: &str, mut rename: F) -> Result<(), String>
+fn rename_recording_files_with<F>(
+    library_dir: &Path,
+    old_filename: &str,
+    new_filename: &str,
+    mut rename: F,
+) -> Result<(), String>
 where
     F: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
@@ -255,8 +282,12 @@ where
     )];
     for (subdir, suffix) in RECORDING_SIDECAR_FILES {
         candidates.push((
-            library_dir.join(subdir).join(format!("{}{}", old_base, suffix)),
-            library_dir.join(subdir).join(format!("{}{}", new_base, suffix)),
+            library_dir
+                .join(subdir)
+                .join(format!("{}{}", old_base, suffix)),
+            library_dir
+                .join(subdir)
+                .join(format!("{}{}", new_base, suffix)),
         ));
     }
 
@@ -279,18 +310,26 @@ where
 
     for (index, (old, new)) in plan.iter().enumerate() {
         if let Err(e) = rename(old, new) {
-            let mut message = format!("Failed to rename {} to {}: {}", old.display(), new.display(), e);
+            let mut message = format!(
+                "Failed to rename {} to {}: {}",
+                old.display(),
+                new.display(),
+                e
+            );
             let rollback_errors: Vec<String> = plan[..index]
                 .iter()
                 .rev()
                 .filter_map(|(done_old, done_new)| {
-                    rename(done_new, done_old).err().map(|re| {
-                        format!("could not restore {}: {}", done_old.display(), re)
-                    })
+                    rename(done_new, done_old)
+                        .err()
+                        .map(|re| format!("could not restore {}: {}", done_old.display(), re))
                 })
                 .collect();
             if !rollback_errors.is_empty() {
-                message.push_str(&format!(". Rollback incomplete: {}", rollback_errors.join("; ")));
+                message.push_str(&format!(
+                    ". Rollback incomplete: {}",
+                    rollback_errors.join("; ")
+                ));
             }
             return Err(message);
         }
@@ -323,25 +362,44 @@ pub const WRITABLE_TEXT_FILES: &[(&str, &[&str])] = &[
 ///
 /// # Side Effects
 /// * Creates `library_dir/subdir` if needed and writes `file_name` inside it.
-pub fn write_library_text_file_in(library_dir: &Path, subdir: &str, file_name: &str, contents: &str) -> Result<(), String> {
+pub fn write_library_text_file_in(
+    library_dir: &Path,
+    subdir: &str,
+    file_name: &str,
+    contents: &str,
+) -> Result<(), String> {
     let suffixes = WRITABLE_TEXT_FILES
         .iter()
         .find(|(dir, _)| *dir == subdir)
         .map(|(_, suffixes)| *suffixes)
-        .ok_or_else(|| format!("Writing to library subdirectory '{}' is not allowed", subdir))?;
+        .ok_or_else(|| {
+            format!(
+                "Writing to library subdirectory '{}' is not allowed",
+                subdir
+            )
+        })?;
 
-    let is_plain_name = Path::new(file_name).file_name().and_then(|n| n.to_str()) == Some(file_name);
+    let is_plain_name =
+        Path::new(file_name).file_name().and_then(|n| n.to_str()) == Some(file_name);
     if !is_plain_name || file_name.contains(['/', '\\']) {
         return Err(format!("Invalid file name: {}", file_name));
     }
-    if !suffixes.iter().any(|s| file_name.len() > s.len() && file_name.ends_with(s)) {
-        return Err(format!("File name '{}' is not allowed in {}", file_name, subdir));
+    if !suffixes
+        .iter()
+        .any(|s| file_name.len() > s.len() && file_name.ends_with(s))
+    {
+        return Err(format!(
+            "File name '{}' is not allowed in {}",
+            file_name, subdir
+        ));
     }
 
     let dir = validate_path_in_dir(library_dir.join(subdir), library_dir)?;
     let target = validate_path_in_dir(dir.join(file_name), library_dir)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {}", dir.display(), e))?;
-    std::fs::write(&target, contents).map_err(|e| format!("Failed to write {}: {}", target.display(), e))
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create {}: {}", dir.display(), e))?;
+    std::fs::write(&target, contents)
+        .map_err(|e| format!("Failed to write {}: {}", target.display(), e))
 }
 
 #[cfg(test)]
@@ -371,7 +429,7 @@ mod tests {
         if docs.is_some() {
             let res = validate_path_in_library("../../../etc/passwd");
             assert!(res.is_err(), "Should reject path traversal");
-            
+
             let res2 = validate_path_in_library("/tmp/outside");
             assert!(res2.is_err(), "Should reject absolute path outside library");
         }
@@ -402,7 +460,9 @@ mod tests {
     fn test_validate_path_in_dir() {
         let lib = temp_library();
         assert!(validate_path_in_dir("Recordings/a.ogg", lib.path()).is_ok());
-        assert!(validate_path_in_dir(lib.path().join("Recordings/../../escape"), lib.path()).is_err());
+        assert!(
+            validate_path_in_dir(lib.path().join("Recordings/../../escape"), lib.path()).is_err()
+        );
         assert!(validate_path_in_dir("/etc/passwd", lib.path()).is_err());
     }
 
@@ -414,7 +474,11 @@ mod tests {
         rename_recording_files_in(lib.path(), "old.ogg", "new.ogg").unwrap();
 
         for f in old_files {
-            assert!(!lib.path().join(&f).exists(), "{} should be gone", f.display());
+            assert!(
+                !lib.path().join(&f).exists(),
+                "{} should be gone",
+                f.display()
+            );
             let renamed = f.to_string_lossy().replace("old", "new");
             assert!(lib.path().join(renamed).exists());
         }
@@ -442,7 +506,10 @@ mod tests {
 
         assert!(err.contains("already exists"), "{}", err);
         for f in old_files {
-            assert!(lib.path().join(f).exists(), "nothing should have been renamed");
+            assert!(
+                lib.path().join(f).exists(),
+                "nothing should have been renamed"
+            );
         }
         assert!(!lib.path().join("Recordings/new.ogg").exists());
     }
@@ -455,17 +522,28 @@ mod tests {
         // Fail when the summary is renamed, after the audio and transcripts were moved.
         let err = rename_recording_files_with(lib.path(), "old.ogg", "new.ogg", |from, to| {
             if from.ends_with("old_summary.md") {
-                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked"))
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "locked",
+                ))
             } else {
                 std::fs::rename(from, to)
             }
         })
         .unwrap_err();
 
-        assert!(err.contains("old_summary.md") && err.contains("locked"), "{}", err);
+        assert!(
+            err.contains("old_summary.md") && err.contains("locked"),
+            "{}",
+            err
+        );
         assert!(!err.contains("Rollback incomplete"), "{}", err);
         for f in old_files {
-            assert!(lib.path().join(&f).exists(), "{} should be restored", f.display());
+            assert!(
+                lib.path().join(&f).exists(),
+                "{} should be restored",
+                f.display()
+            );
             let renamed = f.to_string_lossy().replace("old", "new");
             assert!(!lib.path().join(renamed).exists());
         }
@@ -479,7 +557,10 @@ mod tests {
         let err = rename_recording_files_with(lib.path(), "old.ogg", "new.ogg", |from, to| {
             // The forward rename of the summary fails, and so does restoring the audio file.
             if from.ends_with("old_summary.md") || from.ends_with("new.ogg") {
-                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked"))
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "locked",
+                ))
             } else {
                 std::fs::rename(from, to)
             }
@@ -527,7 +608,11 @@ mod tests {
 
         let err = delete_recording_files_in(lib.path(), "rec.ogg").unwrap_err();
 
-        assert!(err.contains("rec.ogg") && err.contains("rec_summary.md"), "{}", err);
+        assert!(
+            err.contains("rec.ogg") && err.contains("rec_summary.md"),
+            "{}",
+            err
+        );
         // The remaining files were still deleted.
         assert!(!lib.path().join("Transcriptions/rec.json").exists());
         assert!(!lib.path().join("Logs/rec_ffmpeg.log").exists());
@@ -544,7 +629,11 @@ mod tests {
 
         delete_sidecar_files_in(lib.path(), "rec.ogg").unwrap();
         for (subdir, suffix) in RECORDING_SIDECAR_FILES {
-            assert!(!lib.path().join(subdir).join(format!("rec{}", suffix)).exists());
+            assert!(!lib
+                .path()
+                .join(subdir)
+                .join(format!("rec{}", suffix))
+                .exists());
         }
     }
 
@@ -553,8 +642,10 @@ mod tests {
         // Start from an empty library: the subdirectory must be created on demand.
         let lib = tempfile::tempdir().unwrap();
 
-        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "first").unwrap();
-        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "second").unwrap();
+        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "first")
+            .unwrap();
+        write_library_text_file_in(lib.path(), "Transcriptions", "rec_transcript.txt", "second")
+            .unwrap();
         write_library_text_file_in(lib.path(), "Transcriptions", "rec.json", "{}").unwrap();
         write_library_text_file_in(lib.path(), "Summaries", "rec_summary.md", "# Summary").unwrap();
 

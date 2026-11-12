@@ -68,7 +68,7 @@ struct OllamaTagsResponse {
 
 pub fn parse_ollama_tags_response(res_body: &str) -> Result<Vec<String>, String> {
     let data: OllamaTagsResponse = serde_json::from_str(res_body).map_err(|e| e.to_string())?;
-    
+
     if let Some(models) = data.models {
         Ok(models.into_iter().map(|m| m.name).collect())
     } else {
@@ -80,18 +80,18 @@ pub fn parse_ollama_tags_response(res_body: &str) -> Result<Vec<String>, String>
 pub async fn get_local_models(ollama_url: String) -> Result<Vec<String>, String> {
     let client = get_client();
     let clean_url = clean_ollama_url(&ollama_url);
-    
+
     let res = client
         .get(format!("{}/api/tags", clean_url))
         .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch models: {}", e))?;
-        
+
     if !res.status().is_success() {
         return Err(format!("Ollama returned status: {}", res.status()));
     }
-    
+
     let body = res.text().await.map_err(|e| e.to_string())?;
     parse_ollama_tags_response(&body)
 }
@@ -127,11 +127,11 @@ struct OllamaGenerateResponse {
 
 pub fn parse_ollama_generate_response(res_body: &str) -> Result<String, String> {
     let data: OllamaGenerateResponse = serde_json::from_str(res_body).map_err(|e| e.to_string())?;
-    
+
     if let Some(err) = data.error {
         return Err(err);
     }
-    
+
     if let Some(response) = data.response {
         Ok(response)
     } else {
@@ -158,7 +158,7 @@ pub async fn generate_local_summary(
     let client = get_client();
     let clean_url = clean_ollama_url(&ollama_url);
     let prompt = prompt_template.replace("{{transcript}}", &transcript);
-    
+
     let body = OllamaGenerateRequest {
         model,
         prompt,
@@ -172,11 +172,15 @@ pub async fn generate_local_summary(
             top_k,
         },
     };
-    
+
     let timeout = timeout_ms.unwrap_or(300000);
 
     if let Some(path) = &log_path {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             use std::io::Write;
             let _ = writeln!(f, "--- LLM REQUEST ---");
             if let Ok(json) = serde_json::to_string_pretty(&body) {
@@ -185,7 +189,7 @@ pub async fn generate_local_summary(
             let _ = writeln!(f, "\n-------------------\n");
         }
     }
-    
+
     let res = client
         .post(format!("{}/api/generate", clean_url))
         .timeout(Duration::from_millis(timeout))
@@ -193,11 +197,15 @@ pub async fn generate_local_summary(
         .send()
         .await
         .map_err(|e| format!("Failed to connect to Ollama at {}: {}", clean_url, e))?;
-        
+
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
         if let Some(path) = &log_path {
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
                 use std::io::Write;
                 let _ = writeln!(f, "--- LLM ERROR ---");
                 let _ = f.write_all(err_text.as_bytes());
@@ -206,11 +214,15 @@ pub async fn generate_local_summary(
         }
         return Err(format!("Ollama error: {}", err_text));
     }
-    
+
     let body_text = res.text().await.map_err(|e| e.to_string())?;
 
     if let Some(path) = &log_path {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             use std::io::Write;
             let _ = writeln!(f, "--- LLM RESPONSE ---");
             let _ = f.write_all(body_text.as_bytes());
@@ -233,7 +245,10 @@ pub fn validate_model_name(model_name: &str) -> Result<(), String> {
     if model_name.len() > 256 {
         return Err("Model name is too long.".to_string());
     }
-    if model_name.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    if model_name
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control())
+    {
         return Err(format!("Invalid model name: {:?}", model_name));
     }
     Ok(())
@@ -407,7 +422,7 @@ mod tests {
         let json = r#"{"models": [{"name": "llama3"}, {"name": "mistral"}]}"#;
         let res = parse_ollama_tags_response(json).unwrap();
         assert_eq!(res, vec!["llama3", "mistral"]);
-        
+
         let empty = r#"{"models": []}"#;
         let res_empty = parse_ollama_tags_response(empty).unwrap();
         assert!(res_empty.is_empty());
@@ -418,7 +433,7 @@ mod tests {
         let json = r#"{"response": "Summary content", "done": true}"#;
         let res = parse_ollama_generate_response(json).unwrap();
         assert_eq!(res, "Summary content");
-        
+
         let err_json = r#"{"error": "Model not found"}"#;
         let res_err = parse_ollama_generate_response(err_json);
         assert_eq!(res_err.unwrap_err(), "Model not found");
@@ -428,8 +443,7 @@ mod tests {
     async fn test_get_local_models_success() {
         let server = httpmock::MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/api/tags");
+            when.method(httpmock::Method::GET).path("/api/tags");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"models": [{"name": "llama3"}, {"name": "mistral"}]}"#);
@@ -445,8 +459,7 @@ mod tests {
     async fn test_generate_local_summary_success() {
         let server = httpmock::MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/api/generate");
+            when.method(httpmock::Method::POST).path("/api/generate");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"response": "Local mock summary", "done": true}"#);
@@ -465,7 +478,8 @@ mod tests {
             None,
             None,
             None,
-        ).await;
+        )
+        .await;
 
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), "Local mock summary");
@@ -486,24 +500,43 @@ mod tests {
     fn test_parse_pull_line() {
         assert_eq!(parse_pull_line("m", "   ").unwrap(), None);
 
-        let manifest = parse_pull_line("m", r#"{"status":"pulling manifest"}"#).unwrap().unwrap();
-        assert_eq!(manifest, PullProgress { model: "m".into(), percent: None, status: "pulling manifest".into() });
-
-        let half = parse_pull_line("m", r#"{"status":"pulling abc","digest":"abc","total":200,"completed":100}"#)
+        let manifest = parse_pull_line("m", r#"{"status":"pulling manifest"}"#)
             .unwrap()
             .unwrap();
+        assert_eq!(
+            manifest,
+            PullProgress {
+                model: "m".into(),
+                percent: None,
+                status: "pulling manifest".into()
+            }
+        );
+
+        let half = parse_pull_line(
+            "m",
+            r#"{"status":"pulling abc","digest":"abc","total":200,"completed":100}"#,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(half.percent, Some(50));
 
-        let zero_total = parse_pull_line("m", r#"{"status":"pulling abc","total":0,"completed":0}"#)
-            .unwrap()
-            .unwrap();
+        let zero_total =
+            parse_pull_line("m", r#"{"status":"pulling abc","total":0,"completed":0}"#)
+                .unwrap()
+                .unwrap();
         assert_eq!(zero_total.percent, None);
 
-        let done = parse_pull_line("m", r#"{"status":"success"}"#).unwrap().unwrap();
+        let done = parse_pull_line("m", r#"{"status":"success"}"#)
+            .unwrap()
+            .unwrap();
         assert_eq!(done.percent, Some(100));
 
         assert_eq!(
-            parse_pull_line("m", r#"{"error":"pull model manifest: file does not exist"}"#).unwrap_err(),
+            parse_pull_line(
+                "m",
+                r#"{"error":"pull model manifest: file does not exist"}"#
+            )
+            .unwrap_err(),
             "pull model manifest: file does not exist"
         );
         assert!(parse_pull_line("m", "not json").is_err());
@@ -559,18 +592,30 @@ mod tests {
     async fn test_pull_model_http_error_and_missing_success() {
         let server = httpmock::MockServer::start();
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/api/pull").json_body_partial(r#"{"name": "bad"}"#);
+            when.method(httpmock::Method::POST)
+                .path("/api/pull")
+                .json_body_partial(r#"{"name": "bad"}"#);
             then.status(500).body(r#"{"error":"something broke"}"#);
         });
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/api/pull").json_body_partial(r#"{"name": "cut"}"#);
+            when.method(httpmock::Method::POST)
+                .path("/api/pull")
+                .json_body_partial(r#"{"name": "cut"}"#);
             then.status(200).body("{\"status\":\"pulling manifest\"}\n");
         });
 
-        let err = pull_model_with_progress(&server.url("/"), "bad", |_| {}).await.unwrap_err();
-        assert!(err.contains("500") && err.contains("something broke"), "{}", err);
+        let err = pull_model_with_progress(&server.url("/"), "bad", |_| {})
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("500") && err.contains("something broke"),
+            "{}",
+            err
+        );
 
-        let err = pull_model_with_progress(&server.url("/"), "cut", |_| {}).await.unwrap_err();
+        let err = pull_model_with_progress(&server.url("/"), "cut", |_| {})
+            .await
+            .unwrap_err();
         assert!(err.contains("without reporting success"), "{}", err);
     }
 
@@ -593,16 +638,27 @@ mod tests {
             when.method(httpmock::Method::DELETE)
                 .path("/api/delete")
                 .json_body_partial(r#"{"name": "ghost"}"#);
-            then.status(404).body(r#"{"error":"model 'ghost' not found"}"#);
+            then.status(404)
+                .body(r#"{"error":"model 'ghost' not found"}"#);
         });
 
-        assert!(delete_ollama_model(server.url("/"), "llama3".into()).await.is_ok());
+        assert!(delete_ollama_model(server.url("/"), "llama3".into())
+            .await
+            .is_ok());
         ok.assert();
 
-        let err = delete_ollama_model(server.url("/"), "ghost".into()).await.unwrap_err();
-        assert!(err.contains("404") && err.contains("model 'ghost' not found"), "{}", err);
+        let err = delete_ollama_model(server.url("/"), "ghost".into())
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("404") && err.contains("model 'ghost' not found"),
+            "{}",
+            err
+        );
         missing.assert();
 
-        assert!(delete_ollama_model(server.url("/"), "".into()).await.is_err());
+        assert!(delete_ollama_model(server.url("/"), "".into())
+            .await
+            .is_err());
     }
 }
