@@ -19,8 +19,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::audio::device::{get_device_name, AudioDeviceSelection};
@@ -54,6 +56,89 @@ impl Default for AudioState {
 }
 
 
+/// Capacity (in callback chunks) of the channel between a CPAL audio callback
+/// and its TCP loopback writer thread.
+///
+/// Audio backends typically deliver one callback every ~10 ms (WASAPI, CoreAudio,
+/// PulseAudio) and at most a few tens of milliseconds (ALSA with large periods),
+/// so 512 chunks buffer roughly 5 seconds of audio or more. That comfortably
+/// absorbs short hiccups of ffmpeg or the writer thread, while bounding memory:
+/// with 10 ms chunks of 48 kHz stereo `f32` this is about 2 MB per stream. If
+/// the writer stalls longer than that, chunks are dropped instead of letting
+/// memory grow without limit.
+pub const AUDIO_CHANNEL_CAPACITY: usize = 512;
+
+/// Minimum interval between two "dropped audio chunks" warnings, so a stalled
+/// writer does not flood the log from the real-time audio callback.
+const DROP_WARNING_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Creates the bounded channel used to hand audio chunks from a CPAL callback
+/// to the TCP loopback writer thread.
+pub fn audio_chunk_channel() -> (mpsc::SyncSender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) {
+    mpsc::sync_channel(AUDIO_CHANNEL_CAPACITY)
+}
+
+/// The sending half of the audio chunk channel, as used from inside a real-time
+/// audio callback.
+///
+/// `send` never blocks: when the channel is full the chunk is dropped and
+/// counted (with a rate-limited warning), and once the receiver is gone all
+/// further chunks are silently discarded.
+pub struct CallbackChunkSender {
+    tx: mpsc::SyncSender<Vec<u8>>,
+    dropped: Arc<AtomicU64>,
+    dropped_at_last_warning: u64,
+    last_warning: Option<Instant>,
+    disconnected: bool,
+}
+
+impl CallbackChunkSender {
+    pub fn new(tx: mpsc::SyncSender<Vec<u8>>) -> Self {
+        Self {
+            tx,
+            dropped: Arc::new(AtomicU64::new(0)),
+            dropped_at_last_warning: 0,
+            last_warning: None,
+            disconnected: false,
+        }
+    }
+
+    /// Returns a shared counter of the chunks dropped because the channel was full.
+    #[cfg(test)]
+    pub fn dropped_counter(&self) -> Arc<AtomicU64> {
+        self.dropped.clone()
+    }
+
+    /// Hands a chunk to the writer thread without ever blocking the caller.
+    pub fn send(&mut self, chunk: Vec<u8>) {
+        if self.disconnected {
+            return;
+        }
+        match self.tx.try_send(chunk) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                let total = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                let now = Instant::now();
+                let due = self
+                    .last_warning
+                    .map_or(true, |t| now.duration_since(t) >= DROP_WARNING_INTERVAL);
+                if due {
+                    log::warn!(
+                        "Audio writer is not keeping up: dropped {} chunk(s) since last warning ({} total)",
+                        total - self.dropped_at_last_warning,
+                        total
+                    );
+                    self.last_warning = Some(now);
+                    self.dropped_at_last_warning = total;
+                }
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.disconnected = true;
+            }
+        }
+    }
+}
+
 pub type AudioStreamConfig = (Box<dyn std::any::Any + Send>, u32, u16, &'static str);
 
 #[cfg_attr(test, mockall::automock)]
@@ -61,7 +146,7 @@ pub trait CpalStreamBuilder: Send + Sync {
     fn build_and_start(
         &self,
         selection: &AudioDeviceSelection,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::SyncSender<Vec<u8>>,
     ) -> Result<AudioStreamConfig, String>;
 }
 
@@ -71,7 +156,7 @@ impl CpalStreamBuilder for DefaultCpalBuilder {
     fn build_and_start(
         &self,
         selection: &AudioDeviceSelection,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::SyncSender<Vec<u8>>,
     ) -> Result<AudioStreamConfig, String> {
         let host = cpal::default_host();
         let device = find_device(&host, selection)
@@ -104,7 +189,6 @@ pub fn spawn_tcp_loopback(
     thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
             use std::io::Write;
-            use std::time::{Duration, Instant};
 
             let bytes_per_sample = match format_str {
                 "f64le" => 8,
@@ -256,10 +340,14 @@ fn samples_to_bytes<T: bytemuck::Pod>(data: &[T]) -> Vec<u8> {
 fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::SyncSender<Vec<u8>>,
     format: cpal::SampleFormat,
 ) -> Result<cpal::Stream, String> {
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+    // The callback runs on the real-time audio thread, so it must never block:
+    // `CallbackChunkSender` only ever uses `try_send`.
+    let mut sender = CallbackChunkSender::new(tx);
 
     macro_rules! build {
         ($type:ty) => {{
@@ -267,7 +355,7 @@ fn build_stream(
                 .build_input_stream(
                     *config,
                     move |data: &[$type], _: &cpal::InputCallbackInfo| {
-                        let _ = tx.send(samples_to_bytes(data));
+                        sender.send(samples_to_bytes(data));
                     },
                     err_fn,
                     None,
@@ -407,7 +495,7 @@ pub async fn start_recording_inner(
             .map_err(|e| format!("Failed to bind TCP: {}", e))?;
         let port = listener.local_addr().unwrap().port();
 
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = audio_chunk_channel();
 
         let (stream_box, sample_rate, channels, format_str) = state.cpal_builder.build_and_start(selection, tx)?;
         
@@ -601,7 +689,7 @@ mod tests {
     fn test_tcp_loopback_logic() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = audio_chunk_channel();
         
         let handle = spawn_tcp_loopback(listener, rx, 48000, 2, "f32le");
         
@@ -665,6 +753,41 @@ mod tests {
         assert!(args.contains(&"[0:a]asplit=2[out1][out2]".to_string()));
     }
 
+    #[test]
+    fn test_callback_send_does_not_block_when_full() {
+        let (tx, rx) = mpsc::sync_channel(2);
+        let mut sender = CallbackChunkSender::new(tx);
+        let dropped = sender.dropped_counter();
+
+        // Run the sends on another thread so a regression to a blocking send
+        // fails the test instead of hanging it.
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            for i in 0..10u8 {
+                sender.send(vec![i]);
+            }
+            done_tx.send(()).unwrap();
+            sender
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("callback-side send blocked on a full channel");
+        let mut sender = worker.join().unwrap();
+
+        assert_eq!(dropped.load(Ordering::Relaxed), 8);
+        assert_eq!(rx.try_recv().unwrap(), vec![0]);
+        assert_eq!(rx.try_recv().unwrap(), vec![1]);
+        assert!(rx.try_recv().is_err());
+
+        // Once the receiver is gone, sends are discarded quietly and are not
+        // counted as drops.
+        drop(rx);
+        sender.send(vec![42]);
+        sender.send(vec![43]);
+        assert!(sender.disconnected);
+        assert_eq!(dropped.load(Ordering::Relaxed), 8);
+    }
+
     struct DropDetector(std::sync::Arc<std::sync::atomic::AtomicBool>);
     impl Drop for DropDetector {
         fn drop(&mut self) {
@@ -704,7 +827,7 @@ mod tests {
             is_input: true,
             is_output: false,
         };
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = audio_chunk_channel();
         
         let res = mock_builder.build_and_start(&selection, tx);
         assert!(res.is_ok());
