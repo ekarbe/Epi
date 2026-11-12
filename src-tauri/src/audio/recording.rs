@@ -825,20 +825,90 @@ mod tests {
         handle.join().unwrap();
     }
 
+    /// Outcome of probing whether a TCP listener on a loopback address is closed.
+    #[derive(Debug, PartialEq)]
+    enum ListenerProbe {
+        /// Nothing is listening on the address any more.
+        Closed,
+        /// Something is listening on the address. This is either the listener
+        /// under test (a real failure) or an unrelated listener (for example
+        /// one from a test running in parallel) that the OS handed the freed
+        /// ephemeral port to. The caller retries with a fresh port; a listener
+        /// that is really still open makes every attempt inconclusive.
+        Inconclusive,
+    }
+
+    /// Checks that no socket is listening on `addr` anymore.
+    ///
+    /// A plain "connect must fail" check is racy because parallel tests also
+    /// bind `127.0.0.1:0` and may be given the port the moment it is freed.
+    /// Instead we first try to bind the exact address ourselves: TCP refuses a
+    /// second listening socket on the same address (std does not set
+    /// `SO_REUSEPORT`), so a successful bind proves the original listener is
+    /// gone. A connection to the address must then reach our probe listener.
+    /// Only if the bind fails because the address is in use do we fall back to
+    /// a connection attempt, whose success is inconclusive.
+    fn probe_listener_closed(addr: std::net::SocketAddr) -> ListenerProbe {
+        match TcpListener::bind(addr) {
+            Ok(probe) => {
+                let client = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2))
+                    .expect("connection to the probe listener should succeed");
+                let (_, peer) = probe
+                    .accept()
+                    .expect("probe listener should accept the connection");
+                assert_eq!(
+                    peer,
+                    client.local_addr().unwrap(),
+                    "connection must be accepted by the probe, not the original listener"
+                );
+                ListenerProbe::Closed
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+                    Err(_) => ListenerProbe::Closed,
+                    Ok(_) => ListenerProbe::Inconclusive,
+                }
+            }
+            Err(e) => panic!("unexpected error re-binding {}: {}", addr, e),
+        }
+    }
+
+    /// Runs `scenario` until the probe is conclusive, with a fresh port each
+    /// time. The scenario returns the address of a listener it expects to be
+    /// closed, plus any streams that must stay open while probing.
+    fn assert_listener_closed_after(
+        mut scenario: impl FnMut() -> (std::net::SocketAddr, Vec<TcpStream>),
+    ) {
+        const ATTEMPTS: usize = 5;
+        for _ in 0..ATTEMPTS {
+            let (addr, _keep_open) = scenario();
+            if probe_listener_closed(addr) == ListenerProbe::Closed {
+                return;
+            }
+        }
+        panic!(
+            "listener still accepted connections in all {} attempts",
+            ATTEMPTS
+        );
+    }
+
     #[test]
     fn test_accept_single_loopback_closes_listener() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
+        assert_listener_closed_after(|| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
 
-        let client = std::net::TcpStream::connect(addr).unwrap();
-        let accepted = accept_single_loopback(listener, Duration::from_secs(5))
-            .expect("first loopback connection should be accepted");
-        assert!(accepted.peer_addr().unwrap().ip().is_loopback());
-        assert_eq!(accepted.peer_addr().unwrap(), client.local_addr().unwrap());
+            let client = std::net::TcpStream::connect(addr).unwrap();
+            let accepted = accept_single_loopback(listener, Duration::from_secs(5))
+                .expect("first loopback connection should be accepted");
+            assert!(accepted.peer_addr().unwrap().ip().is_loopback());
+            assert_eq!(accepted.peer_addr().unwrap(), client.local_addr().unwrap());
 
-        // The listener has been dropped, so further connections are refused.
-        let second = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2));
-        assert!(second.is_err(), "second connection must not succeed");
+            // The accepted connection stays open while we check that the
+            // listener itself has been dropped, so no second connection can be
+            // accepted by it.
+            (addr, vec![client, accepted])
+        });
     }
 
     #[test]
@@ -862,17 +932,19 @@ mod tests {
 
     #[test]
     fn test_accept_single_loopback_times_out() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
+        assert_listener_closed_after(|| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
 
-        let start = Instant::now();
-        assert!(accept_single_loopback(listener, Duration::from_millis(200)).is_none());
-        let elapsed = start.elapsed();
-        assert!(elapsed >= Duration::from_millis(200));
-        assert!(elapsed < Duration::from_secs(5));
+            let start = Instant::now();
+            assert!(accept_single_loopback(listener, Duration::from_millis(200)).is_none());
+            let elapsed = start.elapsed();
+            assert!(elapsed >= Duration::from_millis(200));
+            assert!(elapsed < Duration::from_secs(5));
 
-        // The listener is closed after the timeout as well.
-        assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err());
+            // The listener is closed after the timeout as well.
+            (addr, Vec::new())
+        });
     }
 
     #[test]
