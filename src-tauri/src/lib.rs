@@ -31,6 +31,7 @@ mod local_llm;
 pub mod process_manager;
 mod secrets;
 mod utils;
+mod webview_args;
 mod whisperx;
 
 /// Entry points for the backend-level end-to-end tests in `tests/`.
@@ -370,6 +371,21 @@ pub fn run() {
         );
     }
 
+    #[allow(unused_mut)]
+    let mut context = tauri::generate_context!();
+    // Lets msedgedriver (WebDriver tests on Windows) reach WebView2; see
+    // `webview_args`. wry enables autoplay by default, so its switch is kept.
+    #[cfg(target_os = "windows")]
+    if let Some(args) = webview_args::merged_browser_args(
+        std::env::var(webview_args::ENV_VAR).ok().as_deref(),
+        true,
+    ) {
+        log::info!("Using WebView2 arguments from {}", webview_args::ENV_VAR);
+        for window in context.config_mut().app.windows.iter_mut() {
+            window.additional_browser_args = Some(args.clone());
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_fs::init())
@@ -456,7 +472,7 @@ pub fn run() {
             db::automations::db_delete_automation,
             db::stats::db_get_stats
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
