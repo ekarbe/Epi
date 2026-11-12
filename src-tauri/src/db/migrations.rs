@@ -276,7 +276,9 @@ mod tests {
 
         run_migrations(&mut conn).unwrap();
 
-        let rows: Vec<(String, Option<i64>, Option<String>, Option<String>)> = conn
+        /// (filename, group_id, label, tags) of one migrated row.
+        type Row = (String, Option<i64>, Option<String>, Option<String>);
+        let rows: Vec<Row> = conn
             .prepare("SELECT filename, group_id, label, tags FROM Recordings ORDER BY id")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))

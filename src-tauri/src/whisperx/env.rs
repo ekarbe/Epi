@@ -179,10 +179,10 @@ mod tests {
     #[test]
     fn test_binary_paths() {
         let env_path = Path::new("/mock/env");
-        let py = get_python_path(&env_path);
+        let py = get_python_path(env_path);
         assert!(py.to_string_lossy().contains("python"));
 
-        let bin = get_binary_path(&env_path);
+        let bin = get_binary_path(env_path);
         assert!(bin.to_string_lossy().contains("whisperx"));
     }
 

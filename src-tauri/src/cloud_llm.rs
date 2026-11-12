@@ -278,7 +278,10 @@ pub async fn generate_cloud_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
+    // An async-aware mutex: the guard is held across the `.await` of each
+    // provider call, which a `std::sync::Mutex` must not be.
+    use tokio::sync::Mutex;
 
     static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
     fn get_test_mutex() -> &'static Mutex<()> {
@@ -329,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_invalid_key_redaction_openai() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let res = generate_cloud_summary(
             "openai".to_string(),
             "transcript".to_string(),
@@ -346,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_invalid_key_redaction_anthropic() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let res = generate_cloud_summary(
             "anthropic".to_string(),
             "transcript".to_string(),
@@ -362,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_invalid_key_redaction_google() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let res = generate_cloud_summary(
             "google".to_string(),
             "transcript".to_string(),
@@ -378,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_success_openai() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let server = httpmock::MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST);
@@ -407,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_success_anthropic() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let server = httpmock::MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST);
@@ -436,7 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_cloud_summary_success_google() {
-        let _guard = get_test_mutex().lock().unwrap();
+        let _guard = get_test_mutex().lock().await;
         let server = httpmock::MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST);

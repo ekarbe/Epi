@@ -184,7 +184,7 @@ pub async fn db_delete_prompt(db: State<'_, Db>, id: i64) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn db_ensure_default_prompts(db: State<'_, Db>) -> Result<(), String> {
-    db.run(|c| ensure_default_prompts(c)).await
+    db.run(ensure_default_prompts).await
 }
 
 #[cfg(test)]

@@ -120,7 +120,7 @@ impl CallbackChunkSender {
                 let now = Instant::now();
                 let due = self
                     .last_warning
-                    .map_or(true, |t| now.duration_since(t) >= DROP_WARNING_INTERVAL);
+                    .is_none_or(|t| now.duration_since(t) >= DROP_WARNING_INTERVAL);
                 if due {
                     log::warn!(
                         "Audio writer is not keeping up: dropped {} chunk(s) since last warning ({} total)",
@@ -1109,7 +1109,7 @@ mod tests {
             std::fs::write(&fake_ffmpeg, "@echo off\ntimeout /t 2 /nobreak >nul\n").unwrap();
         }
 
-        let docs = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let epi_lib = docs.join("Epi Library");
         let rec_dir = epi_lib.join("Recordings");
         let logs_dir = epi_lib.join("Logs");

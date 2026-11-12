@@ -36,7 +36,7 @@ pub fn validate_path_in_library<P: AsRef<Path>>(path: P) -> Result<PathBuf, Stri
         dirs::document_dir().ok_or_else(|| "Could not find documents directory".to_string())?;
 
     #[cfg(test)]
-    let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+    let docs_dir = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
 
     let library_dir = docs_dir.join("Epi Library");
     validate_path_in_dir(path, &library_dir)

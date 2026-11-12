@@ -442,7 +442,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transcribe_cloud_missing_key() {
-        let docs = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let path = docs.join("Epi Library").join("Recordings").join("test.ogg");
 
         let res = transcribe_cloud(
@@ -496,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_transcribe_cloud_success_openai() {
         use std::io::Write;
-        let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs_dir = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let lib_dir = docs_dir.join("Epi Library");
         std::fs::create_dir_all(&lib_dir).unwrap();
         let tmp_path = lib_dir.join("fake_audio_openai.ogg");
@@ -534,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn test_transcribe_cloud_success_google() {
         use std::io::Write;
-        let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs_dir = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let lib_dir = docs_dir.join("Epi Library");
         std::fs::create_dir_all(&lib_dir).unwrap();
         let tmp_path = lib_dir.join("fake_audio_google.ogg");
