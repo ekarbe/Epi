@@ -8,41 +8,58 @@ on:
 
 jobs:
   test-frontend:
-    runs-on: ubuntu-latest
+    name: test-frontend (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-          
+
       - name: Install dependencies
         run: npm ci
-        
+
       - name: Type-check
         run: npx tsc --noEmit
 
       - name: Run Vitest with Coverage
+        if: matrix.os == 'ubuntu-latest'
         run: npm run test:coverage
 
+      - name: Run Vitest
+        if: matrix.os != 'ubuntu-latest'
+        run: npm test
+
   test-backend:
-    runs-on: ubuntu-latest
+    name: test-backend (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          
+
       - name: Install Dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
-          
+
       - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
         working-directory: ./src-tauri
         run: cargo fmt --check
 
@@ -53,8 +70,9 @@ jobs:
       - name: Run cargo test
         working-directory: ./src-tauri
         run: cargo test
-        
+
       - name: Run cargo tarpaulin
+        if: matrix.os == 'ubuntu-latest'
         working-directory: ./src-tauri
         run: |
           cargo install cargo-tarpaulin
