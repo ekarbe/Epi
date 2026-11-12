@@ -21,28 +21,45 @@ use std::io::{BufRead, BufReader};
 use std::thread;
 use crate::whisperx::env::{get_env_path, get_binary_path, get_python_path};
 
-pub fn build_python_patch_script() -> &'static str {
-    r#"
-import os
-import whisperx
+/// The WhisperX release installed into the managed virtual environment.
+pub const WHISPERX_VERSION: &str = "3.8.6";
 
-asr_file = os.path.join(os.path.dirname(whisperx.__file__), 'asr.py')
-with open(asr_file, 'r', encoding='utf-8') as f:
-    content = f.read()
+/// PyTorch packages pinned to the versions required by WhisperX 3.8.6
+/// (`torch~=2.8.0`, `torchaudio~=2.8.0`, `torchvision~=0.23.0`).
+///
+/// The `==` specs also match local variants such as `2.8.0+cpu` from the CPU-only index.
+pub const TORCH_REQUIREMENTS: &[&str] = &["torch==2.8.0", "torchvision==0.23.0", "torchaudio==2.8.0"];
 
-target = "total_segments = len(vad_segments)"
-replacement = """total_segments = len(vad_segments)
-        if total_segments == 0:
-            return {"segments": [], "language": language}"""
+/// WhisperX runtime dependencies, pinned to the versions in the upstream `uv.lock`
+/// of the WhisperX 3.8.6 release (plus `sounddevice` for live transcription).
+pub const WHISPERX_DEPENDENCIES: &[&str] = &[
+    "ctranslate2==4.6.0",
+    "faster-whisper==1.2.0",
+    "nltk==3.9.4",
+    "numpy==2.2.6",
+    "omegaconf==2.3.0",
+    "pandas==2.2.3",
+    "pyannote-audio==4.0.4",
+    "huggingface-hub==0.35.3",
+    "transformers==4.57.6",
+    "torchcodec==0.7.0",
+    "sounddevice==0.5.6",
+];
 
-if target in content and "return {\"segments\": []" not in content:
-    content = content.replace(target, replacement)
-    with open(asr_file, 'w', encoding='utf-8') as f:
-        f.write(content)
-    print("Successfully patched whisperx/asr.py")
-else:
-    print("Patch already applied or target not found.")
-"#
+/// Returns the pinned pip requirement spec for the WhisperX package itself.
+pub fn whisperx_requirement() -> String {
+    format!("whisperx=={}", WHISPERX_VERSION)
+}
+
+/// Builds the pip arguments that install the pinned WhisperX dependencies.
+///
+/// The PyTorch pins are repeated so pip can never replace the already installed
+/// (CPU or CUDA) PyTorch build while resolving the other packages.
+pub fn build_dependency_install_args() -> Vec<&'static str> {
+    let mut args = vec!["install"];
+    args.extend_from_slice(TORCH_REQUIREMENTS);
+    args.extend_from_slice(WHISPERX_DEPENDENCIES);
+    args
 }
 
 /// Represents the local installation status and configuration of the WhisperX engine.
@@ -148,12 +165,13 @@ pub async fn check_cuda_support() -> Result<bool, String> {
 }
 
 /// Sets up and installs WhisperX locally by creating an isolated virtual environment,
-/// upgrading pip, installing PyTorch and WhisperX dependencies, applying a compatibility patch,
+/// upgrading pip, installing pinned PyTorch, WhisperX and dependency versions,
 /// and pre-downloading the base models.
 ///
 /// # Arguments
 /// * `app_handle` - The Tauri application handle.
 /// * `window` - The Tauri window handle used to emit logs to the frontend.
+/// * `cpu_only` - Install the CPU-only PyTorch build instead of the CUDA build.
 ///
 /// # Returns
 /// * `Result<(), String>` - Ok(()) on success, or an error description.
@@ -165,10 +183,15 @@ pub async fn check_cuda_support() -> Result<bool, String> {
 /// * Emits `whisperx-install-log` events to the frontend.
 #[tauri::command]
 pub async fn install_whisperx(app_handle: AppHandle, window: Window, cpu_only: bool) -> Result<(), String> {
-    if crate::whisperx::env::resolve_system_python().is_none() {
+    // The pinned WhisperX/PyTorch set only supports Python 3.10-3.13, so fall back to the
+    // portable Python 3.11 when the system interpreter is missing or outside that range.
+    let system_python_usable = crate::whisperx::env::resolve_system_python()
+        .map(|cmd| crate::whisperx::env::python_version_is_supported(&cmd))
+        .unwrap_or(false);
+    if !system_python_usable {
         let portable_path = crate::whisperx::python::get_portable_python_path(&app_handle).unwrap_or_default();
         if !portable_path.exists() {
-            let _ = window.emit("whisperx-install-log", "System Python not found. Installing portable Python...");
+            let _ = window.emit("whisperx-install-log", "No supported system Python (3.10-3.13) found. Installing portable Python...");
             crate::whisperx::python::install_portable_python(&app_handle, &window).await?;
         }
     }
@@ -270,51 +293,33 @@ pub async fn install_whisperx(app_handle: AppHandle, window: Window, cpu_only: b
             emit_log("Upgrading pip...");
             run_pip(vec!["install", "--upgrade", "pip"], &window, &registry)?;
 
-            // 2. Install PyTorch
+            // 2. Install pinned PyTorch (CPU-only index or default CUDA build)
+            let mut torch_args = vec!["install"];
+            torch_args.extend_from_slice(TORCH_REQUIREMENTS);
             if cpu_only {
                 emit_log("Installing lightweight CPU-only PyTorch...");
                 #[cfg(not(target_os = "macos"))]
-                run_pip(vec!["install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cpu"], &window, &registry)?;
-                
-                #[cfg(target_os = "macos")]
-                run_pip(vec!["install", "torch", "torchvision", "torchaudio"], &window, &registry)?;
+                torch_args.extend_from_slice(&["--index-url", "https://download.pytorch.org/whl/cpu"]);
             } else {
                 emit_log("Installing PyTorch with CUDA support (this will require ~5.6GB of disk space)...");
-                run_pip(vec!["install", "torch", "torchvision", "torchaudio"], &window, &registry)?;
             }
+            run_pip(torch_args, &window, &registry)?;
 
-            // 3. Install WhisperX dependencies explicitly (to avoid whisperX's strict torch~=2.8.0 pin which fails on Python 3.14)
+            // 3. Install the pinned WhisperX dependencies explicitly
             emit_log("Installing WhisperX dependencies...");
-            run_pip(vec![
-                "install",
-                "ctranslate2", "faster-whisper", "nltk", "omegaconf", "pandas", "pyannote-audio", "huggingface-hub", "transformers", "sounddevice"
-            ], &window, &registry)?;
+            run_pip(build_dependency_install_args(), &window, &registry)?;
 
-            // 4. Install WhisperX without strict dependency checking
-            emit_log("Installing WhisperX from github repository...");
-            run_pip(vec![
-                "install", "--no-deps", "--ignore-requires-python",
-                "git+https://github.com/m-bain/whisperx.git"
-            ], &window, &registry)?;
+            // 4. Install the pinned WhisperX release with --no-deps: its dependencies are
+            // already pinned above, and resolving its metadata would additionally pull
+            // `triton` from PyPI on Linux x86_64 (unused by WhisperX, ~150MB) even for
+            // CPU-only installs. PyTorch must stay the build chosen in step 2.
+            let whisperx_spec = whisperx_requirement();
+            emit_log(&format!("Installing WhisperX {}...", WHISPERX_VERSION));
+            run_pip(vec!["install", "--no-deps", &whisperx_spec], &window, &registry)?;
 
-            // 5. Patch whisperx/asr.py to handle empty vad_segments
-            emit_log("Patching whisperx to fix transformers compatibility...");
-            let python_patch_script = build_python_patch_script();
             let python_bin = get_python_path(&env_path);
-            let mut patch_cmd = Command::new(&python_bin);
-            patch_cmd.arg("-c").arg(python_patch_script);
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                patch_cmd.creation_flags(0x08000000);
-            }
-            let patch_output = crate::process_manager::run_registered(&registry, patch_cmd)?;
-            
-            if !patch_output.status.success() {
-                return Err("Failed to patch whisperx".into());
-            }
 
-            // 6. Pre-download default models
+            // 5. Pre-download default models
             emit_log("Pre-downloading tiny model (this may take a moment)...");
             let predownload_script = "import whisperx; whisperx.load_model('tiny', device='cpu', compute_type='int8')";
             let mut download_cmd = Command::new(&python_bin);
@@ -350,11 +355,36 @@ pub async fn install_whisperx(app_handle: AppHandle, window: Window, cpu_only: b
 mod tests {
     use super::*;
 
+    /// Every package spec passed to pip must be pinned to an exact version.
     #[test]
-    fn test_build_python_patch_script() {
-        let script = build_python_patch_script();
-        assert!(script.contains("import whisperx"));
-        assert!(script.contains("total_segments = len(vad_segments)"));
-        assert!(script.contains("return {\"segments\": [], \"language\": language}"));
+    fn test_all_requirements_are_pinned() {
+        let whisperx_spec = whisperx_requirement();
+        let mut specs: Vec<&str> = TORCH_REQUIREMENTS.to_vec();
+        specs.extend_from_slice(WHISPERX_DEPENDENCIES);
+        specs.push(&whisperx_spec);
+        for spec in specs {
+            let parts: Vec<&str> = spec.split("==").collect();
+            assert_eq!(parts.len(), 2, "requirement is not pinned with '==': {}", spec);
+            assert!(!parts[0].is_empty() && !parts[1].is_empty(), "malformed requirement: {}", spec);
+            assert!(!spec.contains("git+") && !spec.contains("://"), "requirement must come from PyPI: {}", spec);
+        }
+    }
+
+    #[test]
+    fn test_whisperx_requirement() {
+        assert_eq!(whisperx_requirement(), format!("whisperx=={}", WHISPERX_VERSION));
+    }
+
+    #[test]
+    fn test_dependency_install_args_keep_torch_pinned() {
+        let args = build_dependency_install_args();
+        assert_eq!(args[0], "install");
+        for torch_spec in TORCH_REQUIREMENTS {
+            assert!(args.contains(torch_spec), "missing {}", torch_spec);
+        }
+        for dep in WHISPERX_DEPENDENCIES {
+            assert!(args.contains(dep), "missing {}", dep);
+        }
+        assert!(args[1..].iter().all(|a| a.contains("==")));
     }
 }

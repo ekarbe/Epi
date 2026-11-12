@@ -98,6 +98,55 @@ pub(crate) fn resolve_system_python() -> Option<String> {
     }
 }
 
+/// Oldest Python minor version (3.x) supported by the pinned WhisperX/PyTorch set.
+pub(crate) const MIN_SUPPORTED_PYTHON_MINOR: u32 = 10;
+/// Newest Python minor version (3.x) supported by the pinned WhisperX/PyTorch set.
+/// WhisperX 3.8.6 declares `<3.14` and torch 2.8.0 ships no wheels for 3.14.
+pub(crate) const MAX_SUPPORTED_PYTHON_MINOR: u32 = 13;
+
+/// Returns whether a Python `major.minor` version can run the pinned WhisperX install.
+pub(crate) fn is_supported_python_version(major: u32, minor: u32) -> bool {
+    major == 3 && (MIN_SUPPORTED_PYTHON_MINOR..=MAX_SUPPORTED_PYTHON_MINOR).contains(&minor)
+}
+
+/// Checks whether the given Python interpreter has a version supported by the pinned
+/// WhisperX install (see [`is_supported_python_version`]).
+///
+/// # Arguments
+/// * `python_cmd` - The interpreter command or path to query.
+///
+/// # Returns
+/// * `bool` - `true` if the interpreter runs and reports a supported version.
+///
+/// # Side Effects
+/// * Spawns the interpreter once to print its version.
+pub(crate) fn python_version_is_supported(python_cmd: &str) -> bool {
+    let mut cmd = std::process::Command::new(python_cmd);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let output = cmd
+        .args(["-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut parts = text.trim().split('.');
+            match (
+                parts.next().and_then(|p| p.parse::<u32>().ok()),
+                parts.next().and_then(|p| p.parse::<u32>().ok()),
+            ) {
+                (Some(major), Some(minor)) => is_supported_python_version(major, minor),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn get_active_python_path(app_handle: &AppHandle) -> Result<String, String> {
     if let Ok(portable) = get_portable_python_path(app_handle) {
         if portable.exists() {
@@ -128,5 +177,21 @@ mod tests {
 
         let bin = get_binary_path(&env_path);
         assert!(bin.to_string_lossy().contains("whisperx"));
+    }
+
+    #[test]
+    fn test_is_supported_python_version() {
+        assert!(!is_supported_python_version(3, 9));
+        assert!(is_supported_python_version(3, 10));
+        assert!(is_supported_python_version(3, 11));
+        assert!(is_supported_python_version(3, 13));
+        assert!(!is_supported_python_version(3, 14));
+        assert!(!is_supported_python_version(2, 11));
+        assert!(!is_supported_python_version(4, 11));
+    }
+
+    #[test]
+    fn test_python_version_is_supported_missing_interpreter() {
+        assert!(!python_version_is_supported("/nonexistent/python-for-epi-test"));
     }
 }
