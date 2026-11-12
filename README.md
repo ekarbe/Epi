@@ -6,7 +6,7 @@
   <a href="https://codecov.io/gh/ekarbe/epi"><img src="https://codecov.io/gh/ekarbe/epi/branch/main/graph/badge.svg" alt="codecov"></a>
 </div>
 
-# Epi — Local-First Meeting Intelligence (v1.1.0)
+# Epi — Local-First Meeting Intelligence (v1.1.1)
 
 [![Build Status](https://github.com/ekarbe/epi/actions/workflows/release.yml/badge.svg)](https://github.com/ekarbe/epi/actions/workflows/release.yml)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-orange.svg?style=flat-square&logo=tauri)](https://v2.tauri.app/)
@@ -38,6 +38,22 @@ Epi wasn't built in a day. It evolved from a simple need into a context-aware lo
 Want to see how it works without downloading the desktop app? Check out the interactive web preview (with simulated recording, transcription, and summarization):
 
 👉 **[Launch the Live Demo](https://eikekarbe.com/Epi/#demo)**
+
+---
+
+## 🛠️ What's New in v1.1.1
+
+A maintenance release focused on security, robustness and correctness. No new features; existing libraries and settings keep working.
+
+- **Secrets in the OS keyring**: Cloud API keys and the Hugging Face token are now stored in the macOS Keychain, Windows Credential Manager or Linux Secret Service instead of plaintext settings / `localStorage`. Existing plaintext secrets are migrated automatically on first start.
+- **No raw SQL in the webview**: All database access moved into typed Rust commands with bound parameters, transactions and versioned schema migrations (existing `epi_meta.db` files are upgraded in place).
+- **Narrower webview permissions**: The UI only keeps read access to the Epi Library. Transcript and summary files are written by a validated Rust command; unused plugins and permissions were removed.
+- **Verified downloads**: Portable Python and FFmpeg archives are pinned to immutable releases and checked against SHA-256 checksums before extraction, with hardened zip/tar extraction.
+- **Reproducible WhisperX installs**: WhisperX 3.8.6, PyTorch and all Python dependencies are pinned to tested versions.
+- **Ollama model management via Rust**: Pulling and deleting models now works with custom Ollama URLs and reports errors properly.
+- **Safer audio capture**: Bounded audio buffering (no unbounded memory growth when FFmpeg stalls), a loopback stream that accepts only a single local connection with a timeout, and removal of an `unsafe` sample cast. Selecting an output device on macOS now returns a clear error instead of being silently skipped.
+- **Reliable file operations**: Renaming and deleting recordings reports file errors, rolls back partial renames and keeps the database in sync with the files on disk.
+- **Code quality**: `rustfmt`, `clippy` and a TypeScript type-check now run in CI; stray scratch files were removed.
 
 ---
 

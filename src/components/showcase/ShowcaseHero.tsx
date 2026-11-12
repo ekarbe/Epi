@@ -35,7 +35,7 @@ export function ShowcaseHero() {
       }}>
         <Sparkles size={16} style={{ color: 'var(--accent-blue)' }} />
         <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-          Version 1.1.0 Release
+          Version 1.1.1 Release
         </span>
       </div>
 
