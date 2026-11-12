@@ -16,7 +16,7 @@
 //
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -179,6 +179,75 @@ impl CpalStreamBuilder for DefaultCpalBuilder {
     }
 }
 
+/// How long a loopback writer thread waits for ffmpeg to connect before giving up.
+pub const LOOPBACK_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Polling interval of the non-blocking accept loop in [`accept_single_loopback`].
+const LOOPBACK_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Accepts exactly one connection from a loopback peer on `listener`.
+///
+/// The listener is polled in non-blocking mode until `timeout` elapses.
+/// Connections from non-loopback peers are closed immediately and ignored.
+/// The listener is consumed and dropped as soon as the first loopback
+/// connection has been accepted (or the deadline has passed), so the port
+/// is closed and no further connections can be made to it.
+///
+/// Returns the accepted stream in blocking mode, or `None` on timeout or error.
+pub fn accept_single_loopback(listener: TcpListener, timeout: Duration) -> Option<TcpStream> {
+    if let Err(e) = listener.set_nonblocking(true) {
+        log::error!("Failed to make audio loopback listener non-blocking: {}", e);
+        return None;
+    }
+    let deadline = Instant::now() + timeout;
+
+    let stream = loop {
+        match listener.accept() {
+            Ok((stream, peer)) => {
+                if !peer.ip().is_loopback() {
+                    log::warn!(
+                        "Rejected non-loopback connection to audio loopback port from {}",
+                        peer
+                    );
+                    drop(stream);
+                    continue;
+                }
+                break stream;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    log::warn!(
+                        "Timed out after {:?} waiting for ffmpeg to connect to the audio loopback port",
+                        timeout
+                    );
+                    return None;
+                }
+                thread::sleep(LOOPBACK_ACCEPT_POLL_INTERVAL);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                log::error!("Failed to accept audio loopback connection: {}", e);
+                return None;
+            }
+        }
+    };
+
+    // Close the listening socket right away so nobody else can connect.
+    drop(listener);
+
+    // Accepted sockets may inherit the non-blocking flag on some platforms.
+    if let Err(e) = stream.set_nonblocking(false) {
+        log::error!("Failed to make audio loopback stream blocking: {}", e);
+        return None;
+    }
+    Some(stream)
+}
+
+/// Spawns the writer thread that streams audio chunks from `rx` to ffmpeg.
+///
+/// The thread accepts a single loopback connection on `listener` (see
+/// [`accept_single_loopback`]) and exits cleanly if ffmpeg does not connect
+/// within [`LOOPBACK_ACCEPT_TIMEOUT`].
 pub fn spawn_tcp_loopback(
     listener: TcpListener,
     rx: mpsc::Receiver<Vec<u8>>,
@@ -186,8 +255,26 @@ pub fn spawn_tcp_loopback(
     channels: u16,
     format_str: &'static str,
 ) -> std::thread::JoinHandle<()> {
+    spawn_tcp_loopback_with_timeout(
+        listener,
+        rx,
+        sample_rate,
+        channels,
+        format_str,
+        LOOPBACK_ACCEPT_TIMEOUT,
+    )
+}
+
+fn spawn_tcp_loopback_with_timeout(
+    listener: TcpListener,
+    rx: mpsc::Receiver<Vec<u8>>,
+    sample_rate: u32,
+    channels: u16,
+    format_str: &'static str,
+    accept_timeout: Duration,
+) -> std::thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
+        if let Some(mut stream) = accept_single_loopback(listener, accept_timeout) {
             use std::io::Write;
 
             let bytes_per_sample = match format_str {
@@ -704,6 +791,75 @@ mod tests {
         
         assert_eq!(buf, vec![1, 2, 3, 4, 5]);
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_accept_single_loopback_closes_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let accepted = accept_single_loopback(listener, Duration::from_secs(5))
+            .expect("first loopback connection should be accepted");
+        assert!(accepted.peer_addr().unwrap().ip().is_loopback());
+        assert_eq!(accepted.peer_addr().unwrap(), client.local_addr().unwrap());
+
+        // The listener has been dropped, so further connections are refused.
+        let second = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2));
+        assert!(second.is_err(), "second connection must not succeed");
+    }
+
+    #[test]
+    fn test_accept_single_loopback_stream_is_blocking() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let mut accepted = accept_single_loopback(listener, Duration::from_secs(5)).unwrap();
+
+        // A read on a non-blocking stream would fail with WouldBlock here.
+        let writer = thread::spawn(move || {
+            use std::io::Write;
+            thread::sleep(Duration::from_millis(100));
+            client.write_all(&[42]).unwrap();
+        });
+        let mut buf = [0u8; 1];
+        accepted.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, [42]);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn test_accept_single_loopback_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let start = Instant::now();
+        assert!(accept_single_loopback(listener, Duration::from_millis(200)).is_none());
+        let elapsed = start.elapsed();
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(elapsed < Duration::from_secs(5));
+
+        // The listener is closed after the timeout as well.
+        assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err());
+    }
+
+    #[test]
+    fn test_tcp_loopback_thread_exits_when_nobody_connects() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (tx, rx) = audio_chunk_channel();
+
+        let handle = spawn_tcp_loopback_with_timeout(
+            listener,
+            rx,
+            48000,
+            2,
+            "f32le",
+            Duration::from_millis(200),
+        );
+        handle.join().unwrap();
+
+        // The receiver was dropped together with the thread.
+        assert!(tx.send(vec![1]).is_err());
     }
 
     #[test]
