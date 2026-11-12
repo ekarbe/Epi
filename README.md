@@ -202,6 +202,17 @@ npm run tauri build
 
 ---
 
+## 🧪 End-to-End Tests
+
+Besides the unit tests (`npx vitest run`, `cd src-tauri && cargo test`), Epi has end-to-end tests that record **real sound** from a virtual audio device playing a 440 Hz test tone and check the resulting `.ogg` (length, level, dominant frequency):
+
+- **Backend E2E** (`src-tauri/tests/recording_e2e.rs`, Linux / Windows / macOS): records through the app's own recording code. Ignored by default; run with `cargo test --test recording_e2e -- --ignored --nocapture` after setting up virtual audio.
+- **UI E2E** (`e2e/ui`, WebdriverIO + tauri-driver, Linux / Windows): drives the real app to record in the Studio, then renames and deletes the recording in the Library and checks the files on disk. There is no macOS UI suite because WKWebView has no WebDriver.
+
+Virtual audio setup scripts (PulseAudio null sink, VB-CABLE, BlackHole) live in `e2e/ci/`, and CI runs everything in `.github/workflows/e2e.yml` on every pull request. See **[e2e/README.md](e2e/README.md)** for prerequisites, commands per OS, CI details and known limitations.
+
+---
+
 ## 📁 Storage Directory Index
 
 | Content Type | Location | Description |
