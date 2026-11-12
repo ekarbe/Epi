@@ -21,6 +21,7 @@ import { getAutomations } from '../services/db/automations';
 import { getLibraryRecordings, getTranscriptForRecording, saveTranscript, saveSummary, getSummaryForTranscript } from '../services/db';
 import { transcribeAudio } from '../services/whisper';
 import { summarizeTranscript } from '../services/ollama';
+import { writeLibraryTextFile } from '../lib/api';
 
 vi.mock('../contexts/LibrarySettingsContext', () => ({
   useLibrarySettings: vi.fn(),
@@ -54,7 +55,7 @@ vi.mock('../lib/api', () => ({
   documentDir: vi.fn().mockResolvedValue('/docs'),
   join: vi.fn().mockImplementation(async (...args) => args.join('/')),
   BaseDirectory: { Document: 1 },
-  writeTextFile: vi.fn().mockResolvedValue(undefined),
+  writeLibraryTextFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('AutomationRunner', () => {
@@ -107,6 +108,7 @@ describe('AutomationRunner', () => {
     await waitFor(() => {
       expect(transcribeAudio).toHaveBeenCalled();
       expect(saveTranscript).toHaveBeenCalledWith(1, 'Transcribed text');
+      expect(writeLibraryTextFile).toHaveBeenCalledWith('Transcriptions', 'rec_transcript.txt', 'Transcribed text');
     });
   });
 
@@ -152,6 +154,7 @@ describe('AutomationRunner', () => {
     await waitFor(() => {
       expect(summarizeTranscript).toHaveBeenCalled();
       expect(saveSummary).toHaveBeenCalledWith(10, 'Summary text');
+      expect(writeLibraryTextFile).toHaveBeenCalledWith('Summaries', 'rec_summary.md', 'Summary text');
     });
   });
 });

@@ -15,34 +15,51 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use reqwest::{Client, multipart};
+use crate::utils::validate_path_in_library;
+use reqwest::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
-use crate::utils::validate_path_in_library;
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
 #[cfg(not(test))]
-fn get_openai_tx_url() -> String { "https://api.openai.com/v1/audio/transcriptions".to_string() }
+fn get_openai_tx_url() -> String {
+    "https://api.openai.com/v1/audio/transcriptions".to_string()
+}
 #[cfg(test)]
-fn get_openai_tx_url() -> String { std::env::var("MOCK_OPENAI_TX_URL").unwrap_or_else(|_| "https://api.openai.com/v1/audio/transcriptions".to_string()) }
+fn get_openai_tx_url() -> String {
+    std::env::var("MOCK_OPENAI_TX_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1/audio/transcriptions".to_string())
+}
 
 #[cfg(not(test))]
-fn get_assembly_upload_url() -> String { "https://api.assemblyai.com/v2/upload".to_string() }
+fn get_assembly_upload_url() -> String {
+    "https://api.assemblyai.com/v2/upload".to_string()
+}
 #[cfg(test)]
-fn get_assembly_upload_url() -> String { std::env::var("MOCK_ASSEMBLY_UPLOAD_URL").unwrap_or_else(|_| "https://api.assemblyai.com/v2/upload".to_string()) }
+fn get_assembly_upload_url() -> String {
+    std::env::var("MOCK_ASSEMBLY_UPLOAD_URL")
+        .unwrap_or_else(|_| "https://api.assemblyai.com/v2/upload".to_string())
+}
 
 #[cfg(not(test))]
-fn get_assembly_tx_url() -> String { "https://api.assemblyai.com/v2/transcript".to_string() }
+fn get_assembly_tx_url() -> String {
+    "https://api.assemblyai.com/v2/transcript".to_string()
+}
 #[cfg(test)]
-fn get_assembly_tx_url() -> String { std::env::var("MOCK_ASSEMBLY_TX_URL").unwrap_or_else(|_| "https://api.assemblyai.com/v2/transcript".to_string()) }
+fn get_assembly_tx_url() -> String {
+    std::env::var("MOCK_ASSEMBLY_TX_URL")
+        .unwrap_or_else(|_| "https://api.assemblyai.com/v2/transcript".to_string())
+}
 
 #[cfg(not(test))]
-fn get_assembly_poll_url(id: &str) -> String { format!("https://api.assemblyai.com/v2/transcript/{}", id) }
+fn get_assembly_poll_url(id: &str) -> String {
+    format!("https://api.assemblyai.com/v2/transcript/{}", id)
+}
 #[cfg(test)]
-fn get_assembly_poll_url(id: &str) -> String { 
+fn get_assembly_poll_url(id: &str) -> String {
     if let Ok(base) = std::env::var("MOCK_ASSEMBLY_POLL_URL") {
         format!("{}/{}", base, id)
     } else {
@@ -51,16 +68,23 @@ fn get_assembly_poll_url(id: &str) -> String {
 }
 
 #[cfg(not(test))]
-fn get_google_tx_url(model: &str, key: &str) -> String { format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, key) }
+fn get_google_tx_url(model: &str, key: &str) -> String {
+    format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, key
+    )
+}
 #[cfg(test)]
-fn get_google_tx_url(model: &str, key: &str) -> String { 
+fn get_google_tx_url(model: &str, key: &str) -> String {
     if let Ok(url) = std::env::var("MOCK_GOOGLE_TX_URL") {
         url
     } else {
-        format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, key)
+        format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, key
+        )
     }
 }
-
 
 /// Returns a shared, lazily-initialized HTTP client with configured connection pooling and timeout.
 fn get_client() -> &'static Client {
@@ -139,9 +163,14 @@ pub async fn transcribe_cloud(
                 .mime_str("audio/ogg")
                 .map_err(|e| e.to_string())?;
 
-            let mut form = multipart::Form::new()
-                .part("file", part)
-                .text("model", if model.is_empty() { "whisper-1".to_string() } else { model });
+            let mut form = multipart::Form::new().part("file", part).text(
+                "model",
+                if model.is_empty() {
+                    "whisper-1".to_string()
+                } else {
+                    model
+                },
+            );
 
             if !language.is_empty() && language != "auto" {
                 form = form.text("language", language);
@@ -156,12 +185,21 @@ pub async fn transcribe_cloud(
                 .multipart(form)
                 .send()
                 .await
-                .map_err(|e| format!("OpenAI request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+                .map_err(|e| {
+                    format!(
+                        "OpenAI request failed: {}",
+                        e.to_string().replace(&api_key, "REDACTED")
+                    )
+                })?;
 
             if !res.status().is_success() {
                 let status = res.status();
                 let text = res.text().await.unwrap_or_default();
-                return Err(format!("OpenAI API error {}: {}", status, text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "OpenAI API error {}: {}",
+                    status,
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             let parsed: TranscriptionResult = res
@@ -182,15 +220,25 @@ pub async fn transcribe_cloud(
                 .body(reqwest::Body::from(file))
                 .send()
                 .await
-                .map_err(|e| format!("AssemblyAI upload failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+                .map_err(|e| {
+                    format!(
+                        "AssemblyAI upload failed: {}",
+                        e.to_string().replace(&api_key, "REDACTED")
+                    )
+                })?;
 
             if !upload_res.status().is_success() {
                 let text = upload_res.text().await.unwrap_or_default();
-                return Err(format!("AssemblyAI upload error: {}", text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "AssemblyAI upload error: {}",
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             #[derive(Deserialize)]
-            struct UploadResponse { upload_url: String }
+            struct UploadResponse {
+                upload_url: String,
+            }
             let upload_data: UploadResponse = upload_res.json().await.map_err(|e| e.to_string())?;
 
             // 2. Transcribe
@@ -204,10 +252,16 @@ pub async fn transcribe_cloud(
                     "best" => "universal-3-5-pro",
                     other => other,
                 };
-                body.as_object_mut().unwrap().insert("speech_models".to_string(), serde_json::json!([mapped_model]));
+                body.as_object_mut().unwrap().insert(
+                    "speech_models".to_string(),
+                    serde_json::json!([mapped_model]),
+                );
             }
             if !language.is_empty() && language != "auto" {
-                body.as_object_mut().unwrap().insert("language_code".to_string(), serde_json::Value::String(language));
+                body.as_object_mut().unwrap().insert(
+                    "language_code".to_string(),
+                    serde_json::Value::String(language),
+                );
             }
 
             let tx_res = client
@@ -216,15 +270,25 @@ pub async fn transcribe_cloud(
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| format!("AssemblyAI transcribe request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+                .map_err(|e| {
+                    format!(
+                        "AssemblyAI transcribe request failed: {}",
+                        e.to_string().replace(&api_key, "REDACTED")
+                    )
+                })?;
 
             if !tx_res.status().is_success() {
                 let text = tx_res.text().await.unwrap_or_default();
-                return Err(format!("AssemblyAI transcribe error: {}", text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "AssemblyAI transcribe error: {}",
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             #[derive(Deserialize)]
-            struct TxResponse { id: String }
+            struct TxResponse {
+                id: String,
+            }
             let tx_data: TxResponse = tx_res.json().await.map_err(|e| e.to_string())?;
 
             // 3. Poll with a timeout/limit to prevent infinite loops
@@ -234,7 +298,10 @@ pub async fn transcribe_cloud(
             loop {
                 attempts += 1;
                 if attempts > MAX_ATTEMPTS {
-                    return Err("AssemblyAI transcription timed out (exceeded maximum polling attempts).".to_string());
+                    return Err(
+                        "AssemblyAI transcription timed out (exceeded maximum polling attempts)."
+                            .to_string(),
+                    );
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -248,11 +315,19 @@ pub async fn transcribe_cloud(
                 if !poll_res.status().is_success() {
                     let status = poll_res.status();
                     let text = poll_res.text().await.unwrap_or_default();
-                    return Err(format!("AssemblyAI poll error {}: {}", status, text.replace(&api_key, "REDACTED")));
+                    return Err(format!(
+                        "AssemblyAI poll error {}: {}",
+                        status,
+                        text.replace(&api_key, "REDACTED")
+                    ));
                 }
 
                 #[derive(Deserialize)]
-                struct PollResponse { status: String, text: Option<String>, error: Option<String> }
+                struct PollResponse {
+                    status: String,
+                    text: Option<String>,
+                    error: Option<String>,
+                }
                 let poll_data: PollResponse = poll_res.json().await.map_err(|e| e.to_string())?;
 
                 if poll_data.status == "completed" {
@@ -266,7 +341,7 @@ pub async fn transcribe_cloud(
             let file_bytes = tokio::fs::read(&audio_path)
                 .await
                 .map_err(|e| format!("Failed to read audio file: {}", e))?;
-            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
             let b64 = STANDARD.encode(&file_bytes);
 
             let body = serde_json::json!({
@@ -287,16 +362,19 @@ pub async fn transcribe_cloud(
 
             let url = get_google_tx_url(&active_model, &api_key);
 
-            let res = client
-                .post(&url)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("Google AI request failed: {}", e.to_string().replace(&api_key, "REDACTED")))?;
+            let res = client.post(&url).json(&body).send().await.map_err(|e| {
+                format!(
+                    "Google AI request failed: {}",
+                    e.to_string().replace(&api_key, "REDACTED")
+                )
+            })?;
 
             if !res.status().is_success() {
                 let text = res.text().await.unwrap_or_default();
-                return Err(format!("Google AI Studio error: {}", text.replace(&api_key, "REDACTED")));
+                return Err(format!(
+                    "Google AI Studio error: {}",
+                    text.replace(&api_key, "REDACTED")
+                ));
             }
 
             let parsed: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -318,7 +396,19 @@ pub fn map_assembly_model(model: &str) -> String {
 
 pub fn map_google_model(model: &str) -> String {
     let mut active_model = model;
-    if active_model.is_empty() || ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "whisper-1"].contains(&active_model) {
+    if active_model.is_empty()
+        || [
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large",
+            "large-v2",
+            "large-v3",
+            "whisper-1",
+        ]
+        .contains(&active_model)
+    {
         active_model = "gemini-2.5-flash";
     }
     if active_model.starts_with("models/") {
@@ -328,9 +418,14 @@ pub fn map_google_model(model: &str) -> String {
 }
 
 pub fn parse_google_transcription_response(parsed: &serde_json::Value) -> Result<String, String> {
-    let candidates = parsed["candidates"].as_array().ok_or("No candidates found in Google response")?;
+    let candidates = parsed["candidates"]
+        .as_array()
+        .ok_or("No candidates found in Google response")?;
     if candidates.is_empty() {
-        return Err("Google response contains empty candidates (possibly blocked by safety filters).".into());
+        return Err(
+            "Google response contains empty candidates (possibly blocked by safety filters)."
+                .into(),
+        );
     }
 
     let text = candidates[0]["content"]["parts"][0]["text"]
@@ -347,9 +442,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_transcribe_cloud_missing_key() {
-        let docs = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let path = docs.join("Epi Library").join("Recordings").join("test.ogg");
-        
+
         let res = transcribe_cloud(
             "openai".to_string(),
             path.to_string_lossy().to_string(),
@@ -357,8 +452,9 @@ mod tests {
             "".to_string(),
             "".to_string(),
             "".to_string(),
-        ).await;
-        
+        )
+        .await;
+
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "API key for openai is missing.");
     }
@@ -392,7 +488,7 @@ mod tests {
         });
         let res = parse_google_transcription_response(&json).unwrap();
         assert_eq!(res, "Hello world");
-        
+
         let empty_json = serde_json::json!({ "candidates": [] });
         assert!(parse_google_transcription_response(&empty_json).is_err());
     }
@@ -400,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_transcribe_cloud_success_openai() {
         use std::io::Write;
-        let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs_dir = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let lib_dir = docs_dir.join("Epi Library");
         std::fs::create_dir_all(&lib_dir).unwrap();
         let tmp_path = lib_dir.join("fake_audio_openai.ogg");
@@ -425,7 +521,8 @@ mod tests {
             "".to_string(),
             "".to_string(),
             "".to_string(),
-        ).await;
+        )
+        .await;
 
         std::env::remove_var("MOCK_OPENAI_TX_URL");
 
@@ -437,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn test_transcribe_cloud_success_google() {
         use std::io::Write;
-        let docs_dir = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs_dir = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let lib_dir = docs_dir.join("Epi Library");
         std::fs::create_dir_all(&lib_dir).unwrap();
         let tmp_path = lib_dir.join("fake_audio_google.ogg");
@@ -462,7 +559,8 @@ mod tests {
             "".to_string(),
             "".to_string(),
             "".to_string(),
-        ).await;
+        )
+        .await;
 
         std::env::remove_var("MOCK_GOOGLE_TX_URL");
 

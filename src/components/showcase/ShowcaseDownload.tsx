@@ -20,7 +20,7 @@ export function ShowcaseDownload({ selectedOS, setSelectedOS, setActiveDocTab }:
     <section id="download" style={{ maxWidth: '1000px', margin: '8rem auto', padding: '0 2rem', position: 'relative', zIndex: 10 }}>
       <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
         <span className="badge green" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem', borderRadius: '2rem', background: 'rgba(39,201,63,0.1)', color: '#27c93f', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Download size={14} /> Get Epi v1.1.0
+          <Download size={14} /> Get Epi v1.1.1
         </span>
         <h2 style={{ fontSize: '3rem', marginTop: '1.5rem', marginBottom: '1rem', letterSpacing: '-0.03em' }}>Download</h2>
         <p style={{ color: 'var(--text-secondary)', maxWidth: '600px', margin: '0 auto', fontSize: '1.1rem', lineHeight: 1.6 }}>
@@ -53,8 +53,8 @@ export function ShowcaseDownload({ selectedOS, setSelectedOS, setActiveDocTab }:
             <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for Linux (Debian/Ubuntu and AppImage).</p>
               <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.0_amd64.deb" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .deb</a>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.0_amd64.AppImage" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download AppImage</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.1_amd64.deb" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .deb</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/epi_1.1.1_amd64.AppImage" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download AppImage</a>
               </div>
             </div>
           )}
@@ -63,8 +63,8 @@ export function ShowcaseDownload({ selectedOS, setSelectedOS, setActiveDocTab }:
             <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for Windows 10/11 (64-bit).</p>
               <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64_en-US.msi" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .msi</a>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64-setup.exe" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .exe</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.1_x64_en-US.msi" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .msi</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.1_x64-setup.exe" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Download .exe</a>
               </div>
             </div>
           )}
@@ -73,8 +73,8 @@ export function ShowcaseDownload({ selectedOS, setSelectedOS, setActiveDocTab }:
             <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Epi for macOS (Intel and Apple Silicon).</p>
               <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_aarch64.dmg" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Apple Silicon (M1/M2/M3)</a>
-                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.0_x64.dmg" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Intel Mac</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.1_aarch64.dmg" className="btn btn-primary" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Apple Silicon (M1/M2/M3)</a>
+                <a href="https://github.com/ekarbe/epi/releases/latest/download/Epi_1.1.1_x64.dmg" className="btn btn-outline" style={{ textDecoration: 'none', padding: '0.75rem 1.5rem', borderRadius: '2rem' }}>Intel Mac</a>
               </div>
             </div>
           )}

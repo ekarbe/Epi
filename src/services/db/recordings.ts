@@ -15,143 +15,53 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { getDb } from './core';
-import { Recording, LibraryRecording, RawRecordingRow, LibraryRow } from './types';
+import { invoke } from '../../lib/api';
+import { Recording, LibraryRecording } from './types';
 
+/**
+ * Inserts a recording and returns its id. Without `timestamp` the database
+ * stores the current time.
+ */
 export async function saveRecording(
   filename: string,
   duration: number,
   label: string | null = null,
   timestamp?: string
 ): Promise<number> {
-  const db = await getDb();
-  let result;
-  if (timestamp) {
-    result = await db.execute(
-      "INSERT INTO Recordings (filename, duration, label, timestamp, tags) VALUES ($1, $2, $3, $4, '[]')",
-      [filename, duration, label, timestamp]
-    );
-  } else {
-    result = await db.execute(
-      "INSERT INTO Recordings (filename, duration, label, tags) VALUES ($1, $2, $3, '[]')",
-      [filename, duration, label]
-    );
-  }
-  return result.lastInsertId || 0;
+  return invoke<number>('db_save_recording', { filename, duration, label, timestamp: timestamp ?? null });
 }
 
+/** All recordings, newest first, including their tags and transcript flag. */
 export async function getLibraryRecordings(): Promise<LibraryRecording[]> {
-  const db = await getDb();
-  const rawRows = await db.select<LibraryRow[]>(`
-    SELECT 
-      r.id, 
-      r.filename, 
-      r.duration, 
-      r.timestamp, 
-      r.label,
-      r.tags,
-      MAX(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END) as hasTranscript
-    FROM Recordings r
-    LEFT JOIN Transcripts t ON r.id = t.recording_id
-    GROUP BY r.id
-    ORDER BY r.timestamp DESC
-  `);
-
-  return rawRows.map(row => ({
-    id: row.id,
-    filename: row.filename,
-    duration: row.duration,
-    timestamp: row.timestamp,
-    label: row.label,
-    hasTranscript: row.hasTranscript === 1,
-    tags: row.tags ? JSON.parse(row.tags) : []
-  }));
+  return invoke<LibraryRecording[]>('db_get_library_recordings');
 }
 
+/** A single library recording (without tags), or `null` if it does not exist. */
 export async function getLibraryRecordingById(id: number): Promise<LibraryRecording | null> {
-  const db = await getDb();
-  const rawRows = await db.select<LibraryRow[]>(`
-    SELECT 
-      r.id, 
-      r.filename, 
-      r.duration, 
-      r.timestamp, 
-      r.label,
-      MAX(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END) as hasTranscript
-    FROM Recordings r
-    LEFT JOIN Transcripts t ON r.id = t.recording_id
-    WHERE r.id = $1
-    GROUP BY r.id
-  `, [id]);
-
-  if (rawRows.length === 0) return null;
-  const row = rawRows[0];
-
-  return {
-    id: row.id,
-    filename: row.filename,
-    duration: row.duration,
-    timestamp: row.timestamp,
-    label: row.label,
-    hasTranscript: row.hasTranscript === 1
-  };
+  return invoke<LibraryRecording | null>('db_get_library_recording_by_id', { id });
 }
 
+/** Deletes a recording together with its transcripts and summaries. */
 export async function deleteRecordingDb(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute('DELETE FROM Recordings WHERE id = $1', [id]);
+  await invoke('db_delete_recording', { id });
 }
 
+/** Updates a recording's file name and label. */
 export async function updateRecording(id: number, filename: string, label: string | null): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    'UPDATE Recordings SET filename = $1, label = $2 WHERE id = $3',
-    [filename, label, id]
-  );
+  await invoke('db_update_recording', { id, filename, label });
 }
 
+/** The raw recording row, or `null` if it does not exist. */
 export async function getRawRecordingById(recId: number): Promise<Recording | null> {
-  const db = await getDb();
-  const rawRows = await db.select<RawRecordingRow[]>('SELECT * FROM Recordings WHERE id = $1', [recId]);
-  if (rawRows.length === 0) return null;
-  const row = rawRows[0];
-  return {
-    id: row.id,
-    filename: row.filename,
-    duration: row.duration,
-    timestamp: row.timestamp,
-    groupId: row.group_id,
-    label: row.label
-  };
+  return invoke<Recording | null>('db_get_raw_recording_by_id', { id: recId });
 }
 
+/** Recordings whose timestamp is more than 30 days in the past (without tags). */
 export async function getRecordingsOlderThan30Days(): Promise<LibraryRecording[]> {
-  const db = await getDb();
-  const rawRows = await db.select<LibraryRow[]>(`
-    SELECT 
-      r.id, 
-      r.filename, 
-      r.duration, 
-      r.timestamp, 
-      r.label,
-      MAX(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END) as hasTranscript
-    FROM Recordings r
-    LEFT JOIN Transcripts t ON r.id = t.recording_id
-    WHERE r.timestamp < datetime('now', '-30 days')
-    GROUP BY r.id
-  `);
-
-  return rawRows.map(row => ({
-    id: row.id,
-    filename: row.filename,
-    duration: row.duration,
-    timestamp: row.timestamp,
-    label: row.label,
-    hasTranscript: row.hasTranscript === 1
-  }));
+  return invoke<LibraryRecording[]>('db_get_recordings_older_than_30_days');
 }
 
+/** Replaces a recording's tag list. */
 export async function updateRecordingTags(id: number, tags: string[]): Promise<void> {
-  const db = await getDb();
-  await db.execute('UPDATE Recordings SET tags = $1 WHERE id = $2', [JSON.stringify(tags), id]);
+  await invoke('db_update_recording_tags', { id, tags });
 }

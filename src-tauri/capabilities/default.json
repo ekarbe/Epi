@@ -6,17 +6,11 @@
   "permissions": [
     "core:default",
 
-    "fs:default",
+    "fs:allow-exists",
+    "fs:allow-read-dir",
     "fs:allow-read-file",
     "fs:allow-read-text-file",
-    "fs:allow-read-dir",
-    "fs:allow-write-text-file",
-    "fs:allow-mkdir",
-    "fs:allow-exists",
-    "fs:allow-remove",
-    "fs:allow-rename",
-    "fs:allow-document-write",
-    "fs:allow-watch",
+    "fs:allow-stat",
     {
       "identifier": "fs:scope",
       "allow": [
@@ -24,11 +18,10 @@
         { "path": "$DOCUMENT/Epi Library/**" }
       ]
     },
-    "dialog:default",
-    "os:default",
-    "sql:default",
-    "sql:allow-execute",
-    "sql:allow-load",
-    "store:default"
+    "os:allow-platform",
+    "store:allow-load",
+    "store:allow-get",
+    "store:allow-delete",
+    "store:allow-save"
   ]
 }

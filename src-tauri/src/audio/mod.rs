@@ -16,9 +16,9 @@
 //
 
 pub mod device;
-pub mod recording;
 pub mod metadata;
+pub mod recording;
 
 pub use device::*;
-pub use recording::*;
 pub use metadata::*;
+pub use recording::*;

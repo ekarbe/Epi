@@ -18,7 +18,7 @@ describe('ShowcaseDownload', () => {
       />
     );
 
-    expect(screen.getByText('Get Epi v1.1.0')).toBeInTheDocument();
+    expect(screen.getByText('Get Epi v1.1.1')).toBeInTheDocument();
     expect(screen.getByText('Epi for Linux (Debian/Ubuntu and AppImage).')).toBeInTheDocument();
     expect(screen.getByText('Download .deb')).toBeInTheDocument();
     expect(screen.getByText('Download AppImage')).toBeInTheDocument();

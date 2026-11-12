@@ -16,9 +16,9 @@
 //
 
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::process::{Child, Command, Output};
 use std::io::copy;
+use std::process::{Child, Command, Output};
+use std::sync::Mutex;
 use std::thread;
 
 /// Thread-safe registry that keeps track of active child processes spawned by Tauri.
@@ -79,18 +79,20 @@ pub fn run_registered(registry: &ProcessRegistry, mut cmd: Command) -> Result<Ou
 
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn process: {}", e))?;
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn process: {}", e))?;
     let pid = child.id();
-    
+
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-    
+
     {
         let mut lock = registry.processes.lock().unwrap_or_else(|e| e.into_inner());
         lock.insert(pid, child);
     }
-    
+
     // Copy stdout to prevent internal buffers from saturating and freezing the process
     let stdout_thread = thread::spawn(move || {
         let mut buf = Vec::new();
@@ -98,7 +100,7 @@ pub fn run_registered(registry: &ProcessRegistry, mut cmd: Command) -> Result<Ou
         let _ = copy(&mut reader, &mut buf);
         buf
     });
-    
+
     // Copy stderr to prevent internal buffers from saturating
     let stderr_thread = thread::spawn(move || {
         let mut buf = Vec::new();
@@ -106,17 +108,19 @@ pub fn run_registered(registry: &ProcessRegistry, mut cmd: Command) -> Result<Ou
         let _ = copy(&mut reader, &mut buf);
         buf
     });
-    
+
     let stdout_res = stdout_thread.join().unwrap_or_default();
     let stderr_res = stderr_thread.join().unwrap_or_default();
-    
+
     let child = {
         let mut lock = registry.processes.lock().unwrap_or_else(|e| e.into_inner());
         lock.remove(&pid)
     };
-    
+
     if let Some(mut c) = child {
-        let status = c.wait().map_err(|e| format!("Failed to wait for process: {}", e))?;
+        let status = c
+            .wait()
+            .map_err(|e| format!("Failed to wait for process: {}", e))?;
         Ok(Output {
             status,
             stdout: stdout_res,
@@ -142,13 +146,13 @@ mod tests {
         let registry = ProcessRegistry::new();
         let mut cmd = Command::new("echo");
         cmd.arg("hello world");
-        
+
         let output = run_registered(&registry, cmd).expect("Failed to run echo command");
         assert!(output.status.success());
         let stdout_str = String::from_utf8_lossy(&output.stdout);
         assert!(stdout_str.contains("hello world"));
     }
-    
+
     #[test]
     fn test_run_registered_invalid_cmd() {
         let registry = ProcessRegistry::new();

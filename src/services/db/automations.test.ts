@@ -10,59 +10,42 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { invoke } from '../../lib/api';
 import { getAutomations, createAutomation, deleteAutomation } from './automations';
-import { getDb } from './core';
 
-vi.mock('./core', () => ({
-  getDb: vi.fn(),
+vi.mock('../../lib/api', () => ({
+  invoke: vi.fn(),
 }));
 
 describe('automations db service', () => {
-  const mockDb = {
-    execute: vi.fn(),
-    select: vi.fn(),
-  };
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as any);
+    vi.mocked(invoke).mockReset();
   });
 
-  describe('getAutomations', () => {
-    it('returns formatted automations', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 1, name: 'Auto', trigger_time: '10:00', timerange_hours: 24, action: 'summarize' }
-      ]);
-      const result = await getAutomations();
-      expect(result).toEqual([
-        { id: 1, name: 'Auto', triggerTime: '10:00', timerangeHours: 24, action: 'summarize' }
-      ]);
+  it('getAutomations returns the backend list', async () => {
+    const list = [{ id: 1, name: 'A', triggerTime: '08:00', timerangeHours: 24, action: 'transcribe' }];
+    vi.mocked(invoke).mockResolvedValue(list);
+    expect(await getAutomations()).toEqual(list);
+    expect(invoke).toHaveBeenCalledWith('db_get_automations');
+  });
+
+  it('createAutomation returns the new id', async () => {
+    vi.mocked(invoke).mockResolvedValue(3);
+    expect(await createAutomation('A', '08:00', 24, 'transcribe')).toBe(3);
+    expect(invoke).toHaveBeenCalledWith('db_create_automation', {
+      name: 'A', triggerTime: '08:00', timerangeHours: 24, action: 'transcribe',
     });
   });
 
-  describe('createAutomation', () => {
-    it('executes insert query', async () => {
-      mockDb.execute.mockResolvedValue({ lastInsertId: 5 });
-      const id = await createAutomation('Auto', '10:00', 24, 'summarize');
-      expect(id).toBe(5);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'INSERT INTO Automations (name, trigger_time, timerange_hours, action) VALUES ($1, $2, $3, $4)',
-        ['Auto', '10:00', 24, 'summarize']
-      );
-    });
-  });
-
-  describe('deleteAutomation', () => {
-    it('executes delete query', async () => {
-      await deleteAutomation(5);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'DELETE FROM Automations WHERE id = $1',
-        [5]
-      );
-    });
+  it('deleteAutomation passes the id', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await deleteAutomation(4);
+    expect(invoke).toHaveBeenCalledWith('db_delete_automation', { id: 4 });
   });
 });

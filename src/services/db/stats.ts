@@ -15,16 +15,9 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { getDb } from './core';
+import { invoke } from '../../lib/api';
 
+/** Number of recordings and transcripts in the library. */
 export async function getStats(): Promise<{ recordingsCount: number; transcriptsCount: number }> {
-  const db = await getDb();
-  
-  const recResult = await db.select<{ count: number }[]>('SELECT COUNT(*) as count FROM Recordings');
-  const transResult = await db.select<{ count: number }[]>('SELECT COUNT(*) as count FROM Transcripts');
-  
-  return {
-    recordingsCount: recResult[0]?.count || 0,
-    transcriptsCount: transResult[0]?.count || 0,
-  };
+  return invoke<{ recordingsCount: number; transcriptsCount: number }>('db_get_stats');
 }

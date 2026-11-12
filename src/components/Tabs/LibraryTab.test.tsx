@@ -167,6 +167,68 @@ describe('LibraryTab', () => {
     });
   });
 
+  it('does not delete the DB record when file deletion fails', async () => {
+    vi.mocked(useLibrarySettings).mockReturnValue({
+      ...defaultContext,
+      recordings: [
+        { id: 1, filename: 'test1.ogg', label: null, duration: 10, timestamp: '123', tags: [], hasAudio: true, hasTranscript: false },
+      ],
+    } as any);
+    vi.mocked(invoke).mockRejectedValueOnce('Failed to delete test1.ogg: permission denied');
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<LibraryTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText('test1')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('delete-btn-1'));
+    await waitFor(() => {
+      expect(screen.getByText('Delete Everything')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Delete Everything'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('permission denied'));
+    });
+    expect(invoke).toHaveBeenCalledWith('delete_recording_files', { filename: 'test1.ogg' });
+    expect(db.deleteRecordingDb).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('does not update the DB record when the file rename fails', async () => {
+    vi.mocked(useLibrarySettings).mockReturnValue({
+      ...defaultContext,
+      recordings: [
+        { id: 1, filename: 'test1.ogg', label: null, duration: 10, timestamp: '123', tags: [], hasAudio: true, hasTranscript: false },
+      ],
+    } as any);
+    vi.mocked(invoke).mockRejectedValueOnce('Failed to rename summary: locked');
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<LibraryTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText('test1')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('edit-btn-1'));
+    fireEvent.change(screen.getByDisplayValue('test1'), { target: { value: 'new_name' } });
+    fireEvent.click(screen.getByTestId('save-rename-btn'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('locked'));
+    });
+    expect(invoke).toHaveBeenCalledWith('rename_recording_files', { oldFilename: 'test1.ogg', newFilename: 'new_name.ogg' });
+    expect(db.updateRecording).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
   it('handles renaming', async () => {
     vi.mocked(useLibrarySettings).mockReturnValue({
       ...defaultContext,
@@ -247,6 +309,11 @@ describe('LibraryTab', () => {
     await waitFor(() => {
       expect(db.deleteTranscriptAndSummaryDb).toHaveBeenCalledWith(1);
     });
+    // Files are removed before the DB entries are cleared.
+    const fileCallOrder = vi.mocked(invoke).mock.invocationCallOrder[
+      vi.mocked(invoke).mock.calls.findIndex(([cmd]) => cmd === 'delete_transcript_files')
+    ];
+    expect(fileCallOrder).toBeLessThan(vi.mocked(db.deleteTranscriptAndSummaryDb).mock.invocationCallOrder[0]);
   });
 
   it('handles adding and removing tags', async () => {

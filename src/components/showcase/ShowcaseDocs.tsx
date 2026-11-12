@@ -122,7 +122,7 @@ npx tsc --noEmit`}
               <ul style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem', paddingLeft: '1.5rem' }}>
                 <li><strong>macOS:</strong> If you see an "unidentified developer" warning, Control-click (or right-click) the Epi application icon in Finder, and select <strong>Open</strong> from the context menu.</li>
                 <li><strong>Windows:</strong> If Microsoft Defender SmartScreen blocks the app, click <strong>More info</strong> and then click <strong>Run anyway</strong>.</li>
-                <li><strong>Linux (AppImage):</strong> Ensure the file is executable before launching: <code>chmod +x epi_1.1.0_amd64.AppImage</code>.</li>
+                <li><strong>Linux (AppImage):</strong> Ensure the file is executable before launching: <code>chmod +x epi_1.1.1_amd64.AppImage</code>.</li>
               </ul>
             </div>
           )}
@@ -135,7 +135,7 @@ npx tsc --noEmit`}
                 <Cpu size={36} style={{ color: 'var(--accent-purple)' }} />
                 <div>
                   <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--accent-purple)', fontSize: '1.1rem' }}>Under the Hood</h4>
-                  <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.95rem', lineHeight: 1.5 }}>Explore the technical architecture, file storage locations, and AI configuration settings powering Epi v1.1.0.</p>
+                  <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.95rem', lineHeight: 1.5 }}>Explore the technical architecture, file storage locations, and AI configuration settings powering Epi v1.1.1.</p>
                 </div>
               </div>
 
@@ -146,7 +146,7 @@ npx tsc --noEmit`}
                   <li><strong>Transcriptions:</strong> ~/Documents/Epi Library/Transcriptions/ (.txt & .json)</li>
                   <li><strong>Summaries:</strong> ~/Documents/Epi Library/Summaries/ (.md)</li>
                   <li><strong>Logs:</strong> ~/Documents/Epi Library/Logs/ (app.log & _ffmpeg.log)</li>
-                  <li><strong>Database:</strong> {"{AppData}/epi_meta.db"} (SQLite)</li>
+                  <li><strong>Database:</strong> {"{AppConfig}/epi_meta.db"} (SQLite)</li>
                   <li><strong>WhisperX Venv:</strong> {"{AppData}/whisperx_env/"} (Python venv)</li>
                   <li><strong>Managed FFmpeg:</strong> {"{AppData}/ffmpeg/"} (Standalone binary)</li>
                 </ul>
@@ -181,9 +181,9 @@ npx tsc --noEmit`}
                 Epi hooks into system audio devices via Rust <code>cpal</code> and pipes stream data through a local TCP loopback to an isolated FFmpeg process. Audio is stored locally in compressed Opus (<code>.ogg</code>) format. No audio is ever transmitted over the network unless you explicitly select an opt-in Cloud Provider.
               </p>
 
-              <h4 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '1rem' }}>Encrypted Secrets Storage</h4>
+              <h4 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '1rem' }}>Secrets in the OS Keyring</h4>
               <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                When opt-in cloud providers are enabled, API keys are stored encrypted at rest using <strong>Tauri Stronghold</strong> (<code>tauri-plugin-stronghold</code>). Master keys are held securely in system keyring storage.
+                When opt-in cloud providers are enabled, API keys and the Hugging Face token are stored in the operating system's keyring: the <strong>macOS Keychain</strong>, the <strong>Windows Credential Manager</strong>, or the <strong>Linux Secret Service</strong> (GNOME Keyring, KWallet). They are never written to Epi's settings files or local storage, and if no keyring is available Epi refuses to save them rather than falling back to plaintext.
               </p>
             </div>
           )}

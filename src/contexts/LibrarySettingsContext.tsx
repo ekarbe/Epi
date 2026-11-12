@@ -21,8 +21,9 @@ import {
   invoke, 
   listen, 
   documentDir, join, BaseDirectory,
-  writeTextFile, exists, readDir, loadStore
+  writeLibraryTextFile, exists, readDir
 } from '../lib/api';
+import { loadSecrets, setSecret, HF_TOKEN_SECRET } from '../lib/secrets';
 import { transcribeAudio } from '../services/whisper';
 import { summarizeTranscript } from '../services/ollama';
 import { initDb, saveRecording, saveTranscript, saveSummary, getTranscriptForRecording, getSummaryForTranscript, getRawRecordingById, getLibraryRecordings, LibraryRecording, updateTranscript, updateSummary, ensureDefaultPrompts, getTags, getGlossary } from '../services/db';
@@ -351,7 +352,8 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
   const [whisperXComputeType, setWhisperXComputeType] = usePersistentState<string>('epi_whisperx_compute_type', 'int8');
   const [whisperXBatchSize, setWhisperXBatchSize] = usePersistentState<number>('epi_whisperx_batch_size', 8);
   const [whisperXDiarize, setWhisperXDiarize] = usePersistentState<boolean>('epi_whisperx_diarize', false);
-  const [whisperXHfToken, setWhisperXHfToken] = usePersistentState<string>('epi_whisperx_hf_token', '');
+  // Kept in the OS keyring (see src/lib/secrets.ts), never in localStorage.
+  const [whisperXHfToken, setWhisperXHfTokenState] = useState<string>('');
   const [whisperXMinSpeakers, setWhisperXMinSpeakers] = usePersistentState<number>('epi_whisperx_min_speakers', 1);
   const [whisperXMaxSpeakers, setWhisperXMaxSpeakers] = usePersistentState<number>('epi_whisperx_max_speakers', 5);
 
@@ -418,34 +420,41 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
   }, [enableLogs]);
 
   useEffect(() => {
-    loadStore('settings.json')
-      .then((store: any) => {
-        store.get('api_keys')
-          .then((keys: any) => {
-            if (keys) setApiKeysState(keys);
-          })
-          .catch((err: any) => console.error("Failed to retrieve api_keys from store:", err));
+    let cancelled = false;
+    loadSecrets()
+      .then(({ apiKeys: keys, hfToken, migrationErrors }) => {
+        if (cancelled) return;
+        // Keep anything the user already typed while the keyring was being read.
+        setApiKeysState(prev => ({ ...keys, ...prev }));
+        setWhisperXHfTokenState(prev => prev || hfToken);
+        if (migrationErrors.length > 0) {
+          alert(`Epi could not move your saved secrets into the system keyring, so they are unavailable for now:\n\n${migrationErrors.join('\n')}\n\nThey are kept in their old location and the move is retried on the next start. Make sure the system keyring is running and unlocked.`);
+        }
       })
-      .catch((err: any) => console.error("Failed to load settings.json store:", err));
+      .catch((err: any) => console.error("Failed to load secrets from the system keyring:", err));
+    return () => { cancelled = true; };
   }, []);
 
-  const setApiKey = (provider: string, key: string) => {
-    const cleanKey = String(key || '').trim();
-    setApiKeysState(prev => {
-      const next = { ...prev, [provider]: cleanKey };
-      loadStore('settings.json')
-        .then((store: any) => {
-          store.set('api_keys', next)
-            .then(() => store.save())
-            .catch((err: any) => console.error("Failed to save store:", err));
-        })
-        .catch((err: any) => console.error("Failed to load store for writing:", err));
-      return next;
+  /** Persists a secret in the OS keyring and tells the user if that fails. */
+  const persistSecret = (name: string, value: string, label: string) => {
+    setSecret(name, value).catch((err: any) => {
+      console.error(`Failed to save ${label} to the system keyring:`, err);
+      alert(`Failed to save ${label} to the system keyring: ${err?.message || String(err)}\n\nThe value is only kept until Epi is closed.`);
     });
   };
 
+  const setApiKey = (provider: string, key: string) => {
+    const cleanKey = String(key || '').trim();
+    setApiKeysState(prev => ({ ...prev, [provider]: cleanKey }));
+    persistSecret(provider, cleanKey, `the ${provider} API key`);
+  };
 
-  
+  const setWhisperXHfToken = (token: string) => {
+    const cleanToken = String(token || '').trim();
+    setWhisperXHfTokenState(cleanToken);
+    persistSecret(HF_TOKEN_SECRET, cleanToken, 'the Hugging Face token');
+  };
+
   const checkWhisperXStatus = async () => {
     try {
       const status: { installed: boolean; binary_path: string | null } = await invoke('check_whisperx_status');
@@ -607,7 +616,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
           const baseName = getBaseName(recording.filename);
           
           // Save the .txt transcript
-          await writeTextFile(`Epi Library/Transcriptions/${baseName}_transcript.txt`, result, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Transcriptions', `${baseName}_transcript.txt`, result);
           
           // If cloud provider, also save a basic .json representation so the user has it
           if (transcriptionProvider !== 'local') {
@@ -617,7 +626,7 @@ export function LibrarySettingsProvider({ children }: { children: ReactNode }) {
               ],
               word_segments: []
             };
-            await writeTextFile(`Epi Library/Transcriptions/${baseName}.json`, JSON.stringify(jsonRepresentation, null, 2), { baseDir: BaseDirectory.Document });
+            await writeLibraryTextFile('Transcriptions', `${baseName}.json`, JSON.stringify(jsonRepresentation, null, 2));
           }
         }
       } catch (err) {
@@ -753,7 +762,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         if (recording) {
           const baseName = getBaseName(recording.filename);
           
-          await writeTextFile(`Epi Library/Summaries/${baseName}_summary.md`, sum, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Summaries', `${baseName}_summary.md`, sum);
         }
       } catch (err: any) {
         console.error("Failed to write summary file", err);
@@ -865,7 +874,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         const recording = await getRawRecordingById(activeRecordingId);
         if (recording) {
           const baseName = getBaseName(recording.filename);
-          await writeTextFile(`Epi Library/Transcriptions/${baseName}_transcript.txt`, text, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Transcriptions', `${baseName}_transcript.txt`, text);
         }
       }
     } catch (err: any) {
@@ -890,7 +899,7 @@ Please enrich and update the baseline analysis by integrating relevant facts, co
         const recording = await getRawRecordingById(activeRecordingId);
         if (recording) {
           const baseName = getBaseName(recording.filename);
-          await writeTextFile(`Epi Library/Summaries/${baseName}_summary.md`, text, { baseDir: BaseDirectory.Document });
+          await writeLibraryTextFile('Summaries', `${baseName}_summary.md`, text);
         }
       }
     } catch (err: any) {

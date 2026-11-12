@@ -6,7 +6,7 @@
   <a href="https://codecov.io/gh/ekarbe/epi"><img src="https://codecov.io/gh/ekarbe/epi/branch/main/graph/badge.svg" alt="codecov"></a>
 </div>
 
-# Epi — Local-First Meeting Intelligence (v1.1.0)
+# Epi — Local-First Meeting Intelligence (v1.1.1)
 
 [![Build Status](https://github.com/ekarbe/epi/actions/workflows/release.yml/badge.svg)](https://github.com/ekarbe/epi/actions/workflows/release.yml)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-orange.svg?style=flat-square&logo=tauri)](https://v2.tauri.app/)
@@ -41,12 +41,29 @@ Want to see how it works without downloading the desktop app? Check out the inte
 
 ---
 
+## 🛠️ What's New in v1.1.1
+
+A maintenance release focused on security, robustness and correctness. No new features; existing libraries and settings keep working.
+
+- **Secrets in the OS keyring**: Cloud API keys and the Hugging Face token are now stored in the macOS Keychain, Windows Credential Manager or Linux Secret Service instead of plaintext settings / `localStorage`. Existing plaintext secrets are migrated automatically on first start.
+- **No raw SQL in the webview**: All database access moved into typed Rust commands with bound parameters, transactions and versioned schema migrations (existing `epi_meta.db` files are upgraded in place).
+- **Narrower webview permissions**: The UI only keeps read access to the Epi Library. Transcript and summary files are written by a validated Rust command; unused plugins and permissions were removed.
+- **Verified downloads**: Portable Python and FFmpeg archives are pinned to immutable releases and checked against SHA-256 checksums before extraction, with hardened zip/tar extraction.
+- **Reproducible WhisperX installs**: WhisperX 3.8.6, PyTorch and all Python dependencies are pinned to tested versions.
+- **Ollama model management via Rust**: Pulling and deleting models now works with custom Ollama URLs and reports errors properly.
+- **Safer audio capture**: Bounded audio buffering (no unbounded memory growth when FFmpeg stalls), a loopback stream that accepts only a single local connection with a timeout, and removal of an `unsafe` sample cast. Selecting an output device on macOS now returns a clear error instead of being silently skipped.
+- **Reliable file operations**: Renaming and deleting recordings reports file errors, rolls back partial renames and keeps the database in sync with the files on disk.
+- **Code quality**: `rustfmt`, `clippy` and a TypeScript type-check now run in CI; stray scratch files were removed.
+
+---
+
 ## ✨ Core Features & What's New in v1.1.0
 
 ### 🎙️ Native Local Audio Capture
 - Low-latency, high-fidelity capture powered by `cpal` device resolution and TCP loopback streaming to an isolated `ffmpeg` process.
 - Audio is saved directly on your local disk as compressed Opus (`.ogg`) files (`~/Documents/Epi Library/Recordings/`).
 - Supports simultaneous multi-device input and output selection.
+- System audio (what your speakers play, e.g. the other side of a call) is captured from output devices on Linux (PulseAudio / PipeWire monitor sources) and Windows (WASAPI loopback). On macOS only input devices can be recorded; see *OS Support & Operating Notes* below for capturing system audio via a virtual device such as BlackHole.
 
 ### ✍️ Offline Speech-to-Text (WhisperX)
 - Offline transcription using WhisperX running in a managed local Python virtual environment (`whisperx_env`).
@@ -75,7 +92,7 @@ Want to see how it works without downloading the desktop app? Check out the inte
 
 ### ☁️ Opt-In Cloud Integrations
 - Optional cloud fallbacks for OpenAI (Whisper & GPT-4o), AssemblyAI, Google AI Studio (Gemini), and Anthropic (Claude).
-- API keys are encrypted at rest using **Tauri Stronghold** (`tauri-plugin-stronghold`).
+- API keys and the Hugging Face token are stored in the operating system's keyring (macOS Keychain, Windows Credential Manager, or the Linux Secret Service such as GNOME Keyring/KWallet), never in plaintext settings files. If no keyring is available, Epi refuses to save them instead of falling back to plaintext.
 
 ---
 
@@ -83,10 +100,10 @@ Want to see how it works without downloading the desktop app? Check out the inte
 
 Epi is organized into four core workspace tabs:
 
-1. **Studio Tab**: Microphones and audio output device selection, record/stop button, real-time audio waveform visualization, and live microphone transcription.
+1. **Studio Tab**: Microphones and audio output device selection (output devices on Linux and Windows only), record/stop button, real-time audio waveform visualization, and live microphone transcription.
 2. **Analysis Tab**: Complete transcript editor, speaker label inspection, summary generation, custom prompt template selection, and tag context injection.
 3. **Library Tab**: Filterable recording history with tag search, playback control, re-transcription actions, and granular multi-tier storage deletion options.
-4. **Engine Tab**: Central control center for Ollama model downloading/deletion, WhisperX setup & CPU-only toggle, built-in one-click FFmpeg manager, Global Glossary & Tags configuration, Naming Schemas, Automations, and Stronghold-encrypted Cloud API keys.
+4. **Engine Tab**: Central control center for Ollama model downloading/deletion, WhisperX setup & CPU-only toggle, built-in one-click FFmpeg manager, Global Glossary & Tags configuration, Naming Schemas, Automations, and Cloud API keys stored in the OS keyring.
 
 ---
 
@@ -100,7 +117,7 @@ Epi is organized into four core workspace tabs:
 | **Backend Core** | Rust 2021 Edition · Tokio · `sysinfo` | Async command dispatch, disk space check, process supervision |
 | **Audio Engine** | `cpal` · `ffmpeg` (TCP Loopback) | Device enumeration, audio streaming, Opus `.ogg` encoding |
 | **Local AI Engine** | WhisperX (Python 3.10+ venv) · Ollama Daemon | Offline speech recognition & LLM summarization |
-| **Storage & Security** | SQLite (`tauri-plugin-sql`) · Tauri Stronghold | Relational metadata storage & encrypted secret storage |
+| **Storage & Security** | SQLite (`rusqlite`, bundled) · OS keyring (`keyring` crate) | Relational metadata storage behind typed Rust commands & secret storage in the system keychain |
 
 ---
 
@@ -115,7 +132,7 @@ Epi is organized into four core workspace tabs:
                                            v
 +-----------------------------------------------------------------------------------+
 |                                RUST TAURI BACKEND                                 |
-|   lib.rs  <-->  audio/  <-->  whisperx/  <-->  cloud_llm/  <-->  local_llm/       |
+|   lib.rs <--> db/ <--> audio/ <--> whisperx/ <--> cloud_llm/ <--> local_llm/      |
 +---------+--------------------+---------------------+------------------------------+
           |                    |                     |
           v                    v                     v
@@ -128,7 +145,7 @@ Epi is organized into four core workspace tabs:
                                | File System / SQLite
                                v
    +-----------------------------------------------------------------+
-   | LOCAL STORAGE: ~/Documents/Epi Library/ & AppData/epi_meta.db   |
+   | LOCAL STORAGE: ~/Documents/Epi Library/ & AppConfig/epi_meta.db |
    +-----------------------------------------------------------------+
 ```
 
@@ -141,7 +158,7 @@ Epi is organized into four core workspace tabs:
 
 ## 🚀 Getting Started
 
-Epi runs across platforms and primarily targets **Linux**, while fully supporting **Windows** and **macOS**.
+Epi runs across platforms and primarily targets **Linux**, while also supporting **Windows** and **macOS**. Recording system audio from output devices works on Linux and Windows; on macOS it requires a virtual loopback device (see *OS Support & Operating Notes* below).
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18+)
@@ -177,10 +194,10 @@ npm run tauri build
 
 ## 💻 OS Support & Operating Notes
 
-- **Linux (Primary Target)**: Supported via `.deb` and `.AppImage`. Audio capture integrates natively with PulseAudio / PipeWire monitor sources.
-- **Windows**: Supported via `.msi` and `.exe` installers. Uses WASAPI loopback audio capture. Unsigned binaries trigger Windows Defender SmartScreen ("More info" -> "Run anyway").
+- **Linux (Primary Target)**: Supported via `.deb` and `.AppImage`. Microphones are recorded via PulseAudio / PipeWire sources and output devices via their monitor sources.
+- **Windows**: Supported via `.msi` and `.exe` installers. Microphones are recorded directly and output devices via WASAPI loopback capture. Unsigned binaries trigger Windows Defender SmartScreen ("More info" -> "Run anyway").
 - **macOS**: Supported via `.dmg` installers (Apple Silicon & Intel).
-  - *macOS Audio Note*: Native macOS security restrictions prevent direct recording of system output audio (Speakers/Headphones) via standard APIs. Microphone capture works out of the box. To capture system audio on macOS, install a virtual audio loopback driver such as [BlackHole](https://existential.audio/blackhole/) and select it in the Studio tab.
+  - *macOS Audio Note*: macOS offers no loopback capture of output devices (Speakers/Headphones) through the audio APIs Epi uses, so output devices are not listed in the Studio tab and only input devices (microphones) can be recorded. To capture system audio, install a virtual audio loopback driver such as [BlackHole](https://existential.audio/blackhole/), route your system output to it (for example via a Multi-Output Device in *Audio MIDI Setup* so you can still hear it), and select BlackHole as an input device in the Studio tab alongside your microphone.
   - *macOS Gatekeeper Note*: Unsigned macOS builds trigger an "unidentified developer" warning. Bypass by Control-clicking (or right-clicking) `Epi.app` in Finder and selecting **Open**.
 
 ---
@@ -193,8 +210,8 @@ npm run tauri build
 | Transcripts | `~/Documents/Epi Library/Transcriptions/` | Raw text (`.txt`) and word-timestamp JSON (`.json`) |
 | Summaries | `~/Documents/Epi Library/Summaries/` | Markdown (`.md`) LLM-generated summaries |
 | Application Logs | `~/Documents/Epi Library/Logs/` | Process logs (`app.log`, `_ffmpeg.log`) |
-| Database | `{AppData}/epi_meta.db` | SQLite metadata database (`tauri-plugin-sql`) |
-| Secrets & Settings | `{AppData}/settings.json` | Encrypted store (`tauri-plugin-stronghold`) |
+| Database | `{AppConfig}/epi_meta.db` | SQLite metadata database (`rusqlite`), accessed only through the Rust `db_*` commands; schema versioned with `PRAGMA user_version` |
+| API Keys & HF Token | OS keyring (service `com.ekarbe.epi`) | macOS Keychain, Windows Credential Manager, or Linux Secret Service |
 | WhisperX Venv | `{AppData}/whisperx_env/` | Isolated Python virtual environment |
 | Local FFmpeg | `{AppData}/ffmpeg/` | Managed standalone FFmpeg binary |
 

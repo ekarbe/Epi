@@ -16,11 +16,13 @@
 //
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::audio::device::{get_device_name, AudioDeviceSelection};
@@ -53,6 +55,88 @@ impl Default for AudioState {
     }
 }
 
+/// Capacity (in callback chunks) of the channel between a CPAL audio callback
+/// and its TCP loopback writer thread.
+///
+/// Audio backends typically deliver one callback every ~10 ms (WASAPI, CoreAudio,
+/// PulseAudio) and at most a few tens of milliseconds (ALSA with large periods),
+/// so 512 chunks buffer roughly 5 seconds of audio or more. That comfortably
+/// absorbs short hiccups of ffmpeg or the writer thread, while bounding memory:
+/// with 10 ms chunks of 48 kHz stereo `f32` this is about 2 MB per stream. If
+/// the writer stalls longer than that, chunks are dropped instead of letting
+/// memory grow without limit.
+pub const AUDIO_CHANNEL_CAPACITY: usize = 512;
+
+/// Minimum interval between two "dropped audio chunks" warnings, so a stalled
+/// writer does not flood the log from the real-time audio callback.
+const DROP_WARNING_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Creates the bounded channel used to hand audio chunks from a CPAL callback
+/// to the TCP loopback writer thread.
+pub fn audio_chunk_channel() -> (mpsc::SyncSender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) {
+    mpsc::sync_channel(AUDIO_CHANNEL_CAPACITY)
+}
+
+/// The sending half of the audio chunk channel, as used from inside a real-time
+/// audio callback.
+///
+/// `send` never blocks: when the channel is full the chunk is dropped and
+/// counted (with a rate-limited warning), and once the receiver is gone all
+/// further chunks are silently discarded.
+pub struct CallbackChunkSender {
+    tx: mpsc::SyncSender<Vec<u8>>,
+    dropped: Arc<AtomicU64>,
+    dropped_at_last_warning: u64,
+    last_warning: Option<Instant>,
+    disconnected: bool,
+}
+
+impl CallbackChunkSender {
+    pub fn new(tx: mpsc::SyncSender<Vec<u8>>) -> Self {
+        Self {
+            tx,
+            dropped: Arc::new(AtomicU64::new(0)),
+            dropped_at_last_warning: 0,
+            last_warning: None,
+            disconnected: false,
+        }
+    }
+
+    /// Returns a shared counter of the chunks dropped because the channel was full.
+    #[cfg(test)]
+    pub fn dropped_counter(&self) -> Arc<AtomicU64> {
+        self.dropped.clone()
+    }
+
+    /// Hands a chunk to the writer thread without ever blocking the caller.
+    pub fn send(&mut self, chunk: Vec<u8>) {
+        if self.disconnected {
+            return;
+        }
+        match self.tx.try_send(chunk) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                let total = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                let now = Instant::now();
+                let due = self
+                    .last_warning
+                    .is_none_or(|t| now.duration_since(t) >= DROP_WARNING_INTERVAL);
+                if due {
+                    log::warn!(
+                        "Audio writer is not keeping up: dropped {} chunk(s) since last warning ({} total)",
+                        total - self.dropped_at_last_warning,
+                        total
+                    );
+                    self.last_warning = Some(now);
+                    self.dropped_at_last_warning = total;
+                }
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.disconnected = true;
+            }
+        }
+    }
+}
 
 pub type AudioStreamConfig = (Box<dyn std::any::Any + Send>, u32, u16, &'static str);
 
@@ -61,7 +145,7 @@ pub trait CpalStreamBuilder: Send + Sync {
     fn build_and_start(
         &self,
         selection: &AudioDeviceSelection,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::SyncSender<Vec<u8>>,
     ) -> Result<AudioStreamConfig, String>;
 }
 
@@ -71,7 +155,7 @@ impl CpalStreamBuilder for DefaultCpalBuilder {
     fn build_and_start(
         &self,
         selection: &AudioDeviceSelection,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::SyncSender<Vec<u8>>,
     ) -> Result<AudioStreamConfig, String> {
         let host = cpal::default_host();
         let device = find_device(&host, selection)
@@ -94,6 +178,75 @@ impl CpalStreamBuilder for DefaultCpalBuilder {
     }
 }
 
+/// How long a loopback writer thread waits for ffmpeg to connect before giving up.
+pub const LOOPBACK_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Polling interval of the non-blocking accept loop in [`accept_single_loopback`].
+const LOOPBACK_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Accepts exactly one connection from a loopback peer on `listener`.
+///
+/// The listener is polled in non-blocking mode until `timeout` elapses.
+/// Connections from non-loopback peers are closed immediately and ignored.
+/// The listener is consumed and dropped as soon as the first loopback
+/// connection has been accepted (or the deadline has passed), so the port
+/// is closed and no further connections can be made to it.
+///
+/// Returns the accepted stream in blocking mode, or `None` on timeout or error.
+pub fn accept_single_loopback(listener: TcpListener, timeout: Duration) -> Option<TcpStream> {
+    if let Err(e) = listener.set_nonblocking(true) {
+        log::error!("Failed to make audio loopback listener non-blocking: {}", e);
+        return None;
+    }
+    let deadline = Instant::now() + timeout;
+
+    let stream = loop {
+        match listener.accept() {
+            Ok((stream, peer)) => {
+                if !peer.ip().is_loopback() {
+                    log::warn!(
+                        "Rejected non-loopback connection to audio loopback port from {}",
+                        peer
+                    );
+                    drop(stream);
+                    continue;
+                }
+                break stream;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    log::warn!(
+                        "Timed out after {:?} waiting for ffmpeg to connect to the audio loopback port",
+                        timeout
+                    );
+                    return None;
+                }
+                thread::sleep(LOOPBACK_ACCEPT_POLL_INTERVAL);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                log::error!("Failed to accept audio loopback connection: {}", e);
+                return None;
+            }
+        }
+    };
+
+    // Close the listening socket right away so nobody else can connect.
+    drop(listener);
+
+    // Accepted sockets may inherit the non-blocking flag on some platforms.
+    if let Err(e) = stream.set_nonblocking(false) {
+        log::error!("Failed to make audio loopback stream blocking: {}", e);
+        return None;
+    }
+    Some(stream)
+}
+
+/// Spawns the writer thread that streams audio chunks from `rx` to ffmpeg.
+///
+/// The thread accepts a single loopback connection on `listener` (see
+/// [`accept_single_loopback`]) and exits cleanly if ffmpeg does not connect
+/// within [`LOOPBACK_ACCEPT_TIMEOUT`].
 pub fn spawn_tcp_loopback(
     listener: TcpListener,
     rx: mpsc::Receiver<Vec<u8>>,
@@ -101,10 +254,27 @@ pub fn spawn_tcp_loopback(
     channels: u16,
     format_str: &'static str,
 ) -> std::thread::JoinHandle<()> {
+    spawn_tcp_loopback_with_timeout(
+        listener,
+        rx,
+        sample_rate,
+        channels,
+        format_str,
+        LOOPBACK_ACCEPT_TIMEOUT,
+    )
+}
+
+fn spawn_tcp_loopback_with_timeout(
+    listener: TcpListener,
+    rx: mpsc::Receiver<Vec<u8>>,
+    sample_rate: u32,
+    channels: u16,
+    format_str: &'static str,
+    accept_timeout: Duration,
+) -> std::thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
+        if let Some(mut stream) = accept_single_loopback(listener, accept_timeout) {
             use std::io::Write;
-            use std::time::{Duration, Instant};
 
             let bytes_per_sample = match format_str {
                 "f64le" => 8,
@@ -113,7 +283,7 @@ pub fn spawn_tcp_loopback(
                 "s8" | "u8" => 1,
                 _ => 4,
             };
-            
+
             let bytes_per_sec = (sample_rate * channels as u32 * bytes_per_sample) as f64;
             let frame_size = (channels as u32 * bytes_per_sample) as u64;
 
@@ -126,7 +296,7 @@ pub fn spawn_tcp_loopback(
             } else if format_str == "u16le" {
                 for i in (0..silence_buf.len()).step_by(2) {
                     silence_buf[i] = 0x00;
-                    silence_buf[i+1] = 0x80;
+                    silence_buf[i + 1] = 0x80;
                 }
             }
 
@@ -144,11 +314,11 @@ pub fn spawn_tcp_loopback(
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         let elapsed_secs = start_time.elapsed().as_secs_f64();
                         let expected_bytes = (elapsed_secs * bytes_per_sec) as u64;
-                        
+
                         if expected_bytes > total_bytes_sent {
                             let mut missing_bytes = expected_bytes - total_bytes_sent;
                             missing_bytes = (missing_bytes / frame_size) * frame_size;
-                            
+
                             if missing_bytes > 0 {
                                 let mut to_write = missing_bytes;
                                 while to_write > 0 {
@@ -188,10 +358,14 @@ pub fn build_ffmpeg_command(
     }
 
     for (port, rate, channels, format_str) in tcp_ports {
-        cmd.arg("-f").arg(*format_str)
-            .arg("-ar").arg(rate.to_string())
-            .arg("-ac").arg(channels.to_string())
-            .arg("-i").arg(format!("tcp://127.0.0.1:{}", port));
+        cmd.arg("-f")
+            .arg(*format_str)
+            .arg("-ar")
+            .arg(rate.to_string())
+            .arg("-ac")
+            .arg(channels.to_string())
+            .arg("-i")
+            .arg(format!("tcp://127.0.0.1:{}", port));
     }
 
     let mut filter_inputs = String::new();
@@ -200,8 +374,10 @@ pub fn build_ffmpeg_command(
     }
 
     if input_count > 1 {
-        cmd.arg("-filter_complex")
-           .arg(format!("{}amix=inputs={}:duration=longest:normalize=0,asplit=2[out1][out2]", filter_inputs, input_count));
+        cmd.arg("-filter_complex").arg(format!(
+            "{}amix=inputs={}:duration=longest:normalize=0,asplit=2[out1][out2]",
+            filter_inputs, input_count
+        ));
     } else if input_count == 1 {
         cmd.arg("-filter_complex").arg("[0:a]asplit=2[out1][out2]");
     }
@@ -244,13 +420,26 @@ fn get_ffmpeg_format(format: cpal::SampleFormat) -> &'static str {
     }
 }
 
+/// Copies a slice of interleaved samples into a byte buffer in native byte
+/// order, ready to be streamed to ffmpeg as raw PCM.
+///
+/// Uses `bytemuck::cast_slice`, so the conversion is checked at compile time
+/// (the sample type must be `Pod`) instead of relying on an unsafe pointer cast.
+fn samples_to_bytes<T: bytemuck::Pod>(data: &[T]) -> Vec<u8> {
+    bytemuck::cast_slice::<T, u8>(data).to_vec()
+}
+
 fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::SyncSender<Vec<u8>>,
     format: cpal::SampleFormat,
 ) -> Result<cpal::Stream, String> {
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+    // The callback runs on the real-time audio thread, so it must never block:
+    // `CallbackChunkSender` only ever uses `try_send`.
+    let mut sender = CallbackChunkSender::new(tx);
 
     macro_rules! build {
         ($type:ty) => {{
@@ -258,13 +447,7 @@ fn build_stream(
                 .build_input_stream(
                     *config,
                     move |data: &[$type], _: &cpal::InputCallbackInfo| {
-                        let bytes = unsafe {
-                            std::slice::from_raw_parts(
-                                data.as_ptr() as *const u8,
-                                data.len() * std::mem::size_of::<$type>(),
-                            )
-                        };
-                        let _ = tx.send(bytes.to_vec());
+                        sender.send(samples_to_bytes(data));
                     },
                     err_fn,
                     None,
@@ -288,10 +471,7 @@ fn build_stream(
     Ok(stream)
 }
 
-fn find_device(
-    host: &cpal::Host,
-    selection: &AudioDeviceSelection,
-) -> Option<cpal::Device> {
+fn find_device(host: &cpal::Host, selection: &AudioDeviceSelection) -> Option<cpal::Device> {
     if selection.name == "Default Audio Device" || selection.name == "default" {
         return if selection.is_input {
             host.default_input_device()
@@ -319,6 +499,28 @@ fn find_device(
     None
 }
 
+/// Checks that the current platform can capture audio from `selection`.
+///
+/// System audio (output device loopback) is captured through PulseAudio /
+/// PipeWire monitor sources on Linux and WASAPI loopback on Windows. macOS
+/// offers no loopback for output devices through `cpal`, so output devices are
+/// not listed there (see `get_audio_devices`). A selection that still names an
+/// output device on macOS is rejected with a clear error instead of being
+/// silently dropped from the recording.
+///
+/// # Errors
+/// * Returns a user-facing message on macOS if `selection` is an output device.
+pub(crate) fn ensure_capture_supported(selection: &AudioDeviceSelection) -> Result<(), String> {
+    if cfg!(target_os = "macos") && selection.is_output {
+        return Err(format!(
+            "Recording system audio from output device \"{}\" is not supported on macOS. \
+             Install a virtual loopback device such as BlackHole and select it as an input device instead.",
+            selection.name
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn start_recording_inner(
     state: &AudioState,
@@ -336,8 +538,8 @@ pub async fn start_recording_inner(
                 .to_string_lossy()
                 .to_string();
             Some(valid)
-        },
-        None => None
+        }
+        None => None,
     };
 
     {
@@ -382,10 +584,16 @@ pub async fn start_recording_inner(
     #[allow(unused_mut)]
     let mut linux_pulse_inputs = Vec::new();
 
+    // Validate every selection before any stream is opened.
+    for selection in &names_to_use {
+        ensure_capture_supported(selection)?;
+    }
+
     for selection in &names_to_use {
         #[cfg(target_os = "linux")]
         {
-            let resolved_name = crate::audio::device::resolve_pulse_device(&selection.name, selection.is_output);
+            let resolved_name =
+                crate::audio::device::resolve_pulse_device(&selection.name, selection.is_output);
             let mut input_name = resolved_name;
             if selection.is_output && !input_name.ends_with(".monitor") {
                 input_name = format!("{}.monitor", input_name);
@@ -394,20 +602,16 @@ pub async fn start_recording_inner(
             continue;
         }
 
-        #[cfg(target_os = "macos")]
-        if selection.is_output {
-            continue; // Cannot natively loopback output on macOS with cpal
-        }
-
         #[allow(unreachable_code)]
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("Failed to bind TCP: {}", e))?;
+        let listener =
+            TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Failed to bind TCP: {}", e))?;
         let port = listener.local_addr().unwrap().port();
 
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = audio_chunk_channel();
 
-        let (stream_box, sample_rate, channels, format_str) = state.cpal_builder.build_and_start(selection, tx)?;
-        
+        let (stream_box, sample_rate, channels, format_str) =
+            state.cpal_builder.build_and_start(selection, tx)?;
+
         tcp_ports.push((port, sample_rate, channels, format_str));
 
         spawn_tcp_loopback(listener, rx, sample_rate, channels, format_str);
@@ -434,7 +638,9 @@ pub async fn start_recording_inner(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stdin(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
 
     let tx = state.audio_tx.clone();
     if let Some(mut stdout) = child.stdout.take() {
@@ -442,7 +648,9 @@ pub async fn start_recording_inner(
             use std::io::Read;
             let mut buf = [0u8; 4096];
             while let Ok(n) = stdout.read(&mut buf) {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 let _ = tx.send(buf[..n].to_vec());
             }
         });
@@ -484,14 +692,16 @@ pub async fn start_recording(
     let ffmpeg_path = crate::ffmpeg::get_local_ffmpeg_path(&app)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "ffmpeg".to_string());
-    
+
     start_recording_inner(&state, ffmpeg_path, output_path, log_path, device_names).await
 }
 
 pub async fn stop_recording_inner(state: &AudioState) -> Result<Vec<String>, String> {
     let session = {
         let mut session_guard = state.session.lock().unwrap_or_else(|e| e.into_inner());
-        session_guard.take().ok_or_else(|| "Not recording".to_string())?
+        session_guard
+            .take()
+            .ok_or_else(|| "Not recording".to_string())?
     };
 
     let mut child = session.process;
@@ -565,28 +775,123 @@ pub async fn stop_recording(state: State<'_, AudioState>) -> Result<Vec<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use std::io::Read;
-    
+
+    #[test]
+    fn test_samples_to_bytes_native_endian() {
+        let f: [f32; 2] = [1.0, -0.5];
+        let mut expected = Vec::new();
+        for v in f {
+            expected.extend_from_slice(&v.to_ne_bytes());
+        }
+        assert_eq!(samples_to_bytes(&f), expected);
+
+        let i: [i16; 3] = [0, i16::MAX, i16::MIN];
+        let mut expected = Vec::new();
+        for v in i {
+            expected.extend_from_slice(&v.to_ne_bytes());
+        }
+        assert_eq!(samples_to_bytes(&i), expected);
+
+        let u: [u8; 2] = [0, 255];
+        assert_eq!(samples_to_bytes(&u), vec![0u8, 255]);
+
+        let d: [f64; 1] = [0.25];
+        assert_eq!(samples_to_bytes(&d), 0.25f64.to_ne_bytes().to_vec());
+
+        let empty: [i32; 0] = [];
+        assert!(samples_to_bytes(&empty).is_empty());
+    }
+
     #[test]
     fn test_tcp_loopback_logic() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let (tx, rx) = mpsc::channel();
-        
+        let (tx, rx) = audio_chunk_channel();
+
         let handle = spawn_tcp_loopback(listener, rx, 48000, 2, "f32le");
-        
+
         let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        
+
         tx.send(vec![1, 2, 3]).unwrap();
         tx.send(vec![4, 5]).unwrap();
         drop(tx);
-        
+
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).unwrap();
-        
+
         assert_eq!(buf, vec![1, 2, 3, 4, 5]);
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_accept_single_loopback_closes_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let accepted = accept_single_loopback(listener, Duration::from_secs(5))
+            .expect("first loopback connection should be accepted");
+        assert!(accepted.peer_addr().unwrap().ip().is_loopback());
+        assert_eq!(accepted.peer_addr().unwrap(), client.local_addr().unwrap());
+
+        // The listener has been dropped, so further connections are refused.
+        let second = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2));
+        assert!(second.is_err(), "second connection must not succeed");
+    }
+
+    #[test]
+    fn test_accept_single_loopback_stream_is_blocking() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let mut accepted = accept_single_loopback(listener, Duration::from_secs(5)).unwrap();
+
+        // A read on a non-blocking stream would fail with WouldBlock here.
+        let writer = thread::spawn(move || {
+            use std::io::Write;
+            thread::sleep(Duration::from_millis(100));
+            client.write_all(&[42]).unwrap();
+        });
+        let mut buf = [0u8; 1];
+        accepted.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, [42]);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn test_accept_single_loopback_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let start = Instant::now();
+        assert!(accept_single_loopback(listener, Duration::from_millis(200)).is_none());
+        let elapsed = start.elapsed();
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(elapsed < Duration::from_secs(5));
+
+        // The listener is closed after the timeout as well.
+        assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err());
+    }
+
+    #[test]
+    fn test_tcp_loopback_thread_exits_when_nobody_connects() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (tx, rx) = audio_chunk_channel();
+
+        let handle = spawn_tcp_loopback_with_timeout(
+            listener,
+            rx,
+            48000,
+            2,
+            "f32le",
+            Duration::from_millis(200),
+        );
+        handle.join().unwrap();
+
+        // The receiver was dropped together with the thread.
+        assert!(tx.send(vec![1]).is_err());
     }
 
     #[test]
@@ -598,9 +903,15 @@ mod tests {
             &[(8080, 48000, 2, "f32le"), (8081, 44100, 1, "s16le")],
             &[],
         );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-filter_complex".to_string()));
-        assert!(args.contains(&"[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,asplit=2[out1][out2]".to_string()));
+        assert!(args.contains(
+            &"[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,asplit=2[out1][out2]"
+                .to_string()
+        ));
         assert!(args.contains(&"tcp://127.0.0.1:8080".to_string()));
         assert!(args.contains(&"tcp://127.0.0.1:8081".to_string()));
         assert!(args.contains(&"out.ogg".to_string()));
@@ -609,13 +920,11 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_build_ffmpeg_command_windows_single_source() {
-        let cmd = build_ffmpeg_command(
-            "ffmpeg.exe",
-            "out.ogg",
-            &[(8080, 48000, 2, "f32le")],
-            &[],
-        );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let cmd = build_ffmpeg_command("ffmpeg.exe", "out.ogg", &[(8080, 48000, 2, "f32le")], &[]);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-filter_complex".to_string()));
         assert!(args.contains(&"[0:a]asplit=2[out1][out2]".to_string()));
     }
@@ -629,11 +938,49 @@ mod tests {
             &[],
             &["alsa_input.pci-0000_00_1f.3.analog-stereo".to_string()],
         );
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"-f".to_string()));
         assert!(args.contains(&"pulse".to_string()));
         assert!(args.contains(&"alsa_input.pci-0000_00_1f.3.analog-stereo".to_string()));
         assert!(args.contains(&"[0:a]asplit=2[out1][out2]".to_string()));
+    }
+
+    #[test]
+    fn test_callback_send_does_not_block_when_full() {
+        let (tx, rx) = mpsc::sync_channel(2);
+        let mut sender = CallbackChunkSender::new(tx);
+        let dropped = sender.dropped_counter();
+
+        // Run the sends on another thread so a regression to a blocking send
+        // fails the test instead of hanging it.
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            for i in 0..10u8 {
+                sender.send(vec![i]);
+            }
+            done_tx.send(()).unwrap();
+            sender
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("callback-side send blocked on a full channel");
+        let mut sender = worker.join().unwrap();
+
+        assert_eq!(dropped.load(Ordering::Relaxed), 8);
+        assert_eq!(rx.try_recv().unwrap(), vec![0]);
+        assert_eq!(rx.try_recv().unwrap(), vec![1]);
+        assert!(rx.try_recv().is_err());
+
+        // Once the receiver is gone, sends are discarded quietly and are not
+        // counted as drops.
+        drop(rx);
+        sender.send(vec![42]);
+        sender.send(vec![43]);
+        assert!(sender.disconnected);
+        assert_eq!(dropped.load(Ordering::Relaxed), 8);
     }
 
     struct DropDetector(std::sync::Arc<std::sync::atomic::AtomicBool>);
@@ -647,16 +994,20 @@ mod tests {
     fn test_streams_dropped_on_session_end() {
         let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let detector = DropDetector(dropped.clone());
-        
+
         let session = RecordingSession {
             #[cfg(unix)]
             process: std::process::Command::new("echo").spawn().unwrap(),
             #[cfg(windows)]
-            process: std::process::Command::new("cmd").arg("/c").arg("echo").spawn().unwrap(),
+            process: std::process::Command::new("cmd")
+                .arg("/c")
+                .arg("echo")
+                .spawn()
+                .unwrap(),
             output_path: "test".to_string(),
             _streams: vec![Box::new(detector)],
         };
-        
+
         drop(session);
         assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
     }
@@ -664,25 +1015,48 @@ mod tests {
     #[test]
     fn test_mock_cpal_stream_builder() {
         let mut mock_builder = MockCpalStreamBuilder::new();
-        mock_builder.expect_build_and_start()
+        mock_builder
+            .expect_build_and_start()
             .times(1)
-            .returning(|_, _| {
-                Ok((Box::new(5), 48000, 2, "f32le"))
-            });
+            .returning(|_, _| Ok((Box::new(5), 48000, 2, "f32le")));
 
         let selection = AudioDeviceSelection {
             name: "Test".to_string(),
             is_input: true,
             is_output: false,
         };
-        let (tx, _rx) = mpsc::channel();
-        
+        let (tx, _rx) = audio_chunk_channel();
+
         let res = mock_builder.build_and_start(&selection, tx);
         assert!(res.is_ok());
         let (_, rate, channels, fmt) = res.unwrap();
         assert_eq!(rate, 48000);
         assert_eq!(channels, 2);
         assert_eq!(fmt, "f32le");
+    }
+
+    #[test]
+    fn test_ensure_capture_supported() {
+        let input = AudioDeviceSelection {
+            name: "Mic".to_string(),
+            is_input: true,
+            is_output: false,
+        };
+        assert!(ensure_capture_supported(&input).is_ok());
+
+        let output = AudioDeviceSelection {
+            name: "Speakers".to_string(),
+            is_input: false,
+            is_output: true,
+        };
+        let res = ensure_capture_supported(&output);
+        if cfg!(target_os = "macos") {
+            let err = res.unwrap_err();
+            assert!(err.contains("Speakers"));
+            assert!(err.contains("not supported on macOS"));
+        } else {
+            assert!(res.is_ok());
+        }
     }
 
     #[tokio::test]
@@ -695,7 +1069,7 @@ mod tests {
     #[tokio::test]
     async fn test_start_recording_inner_already_recording() {
         let state = AudioState::default();
-        
+
         let mut cmd = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
         if cfg!(windows) {
             cmd.args(["/c", "timeout 10"]);
@@ -703,7 +1077,7 @@ mod tests {
             cmd.arg("10");
         }
         let child = cmd.spawn().unwrap();
-            
+
         {
             let mut guard = state.session.lock().unwrap();
             *guard = Some(RecordingSession {
@@ -712,17 +1086,18 @@ mod tests {
                 _streams: vec![],
             });
         }
-        
+
         let res = start_recording_inner(
             &state,
             "ffmpeg".to_string(),
             "out.ogg".to_string(),
             Some("out.log".to_string()),
             Some(vec![]),
-        ).await;
-        
+        )
+        .await;
+
         assert_eq!(res.unwrap_err(), "Recording is already in progress");
-        
+
         let mut guard = state.session.lock().unwrap();
         let mut session = guard.take().unwrap();
         let _ = session.process.kill();
@@ -743,13 +1118,12 @@ mod tests {
     #[tokio::test]
     async fn test_start_recording_inner_success() {
         let mut mock_builder = MockCpalStreamBuilder::new();
-        
+
         #[cfg(not(target_os = "linux"))]
-        mock_builder.expect_build_and_start()
+        mock_builder
+            .expect_build_and_start()
             .times(1)
-            .returning(|_, _| {
-                Ok((Box::new(5), 48000, 2, "f32le"))
-            });
+            .returning(|_, _| Ok((Box::new(5), 48000, 2, "f32le")));
 
         #[cfg(target_os = "linux")]
         mock_builder.expect_build_and_start().times(0);
@@ -781,13 +1155,13 @@ mod tests {
             std::fs::write(&fake_ffmpeg, "@echo off\ntimeout /t 2 /nobreak >nul\n").unwrap();
         }
 
-        let docs = dirs::document_dir().unwrap_or_else(|| std::env::temp_dir());
+        let docs = dirs::document_dir().unwrap_or_else(std::env::temp_dir);
         let epi_lib = docs.join("Epi Library");
         let rec_dir = epi_lib.join("Recordings");
         let logs_dir = epi_lib.join("Logs");
         std::fs::create_dir_all(&rec_dir).unwrap();
         std::fs::create_dir_all(&logs_dir).unwrap();
-        
+
         let out_path = rec_dir.join("test_out.ogg").to_string_lossy().to_string();
         let log_path = logs_dir.join("test_log.log").to_string_lossy().to_string();
 
@@ -803,7 +1177,8 @@ mod tests {
             out_path,
             Some(log_path),
             Some(vec![device]),
-        ).await;
+        )
+        .await;
 
         assert!(res.is_ok());
 
@@ -838,22 +1213,28 @@ mod tests {
 
         let child = std::process::Command::new(&fake_ffmpeg).spawn().unwrap();
 
+        // Write the fake recording into the temp dir so the test never leaves
+        // an artifact in the working directory (previously src-tauri/).
+        let out_path = temp_dir.join("epi_test_stop_out.ogg");
+        let out_path_str = out_path.to_string_lossy().to_string();
+
         let state = AudioState::default();
         {
             let mut guard = state.session.lock().unwrap();
             *guard = Some(RecordingSession {
                 process: child,
-                output_path: "test_stop_out.ogg".to_string(),
+                output_path: out_path_str.clone(),
                 _streams: vec![],
             });
         }
-        
-        std::fs::write("test_stop_out.ogg", vec![0u8; 1024]).unwrap();
+
+        std::fs::write(&out_path, vec![0u8; 1024]).unwrap();
 
         let res = stop_recording_inner(&state).await;
+        let _ = std::fs::remove_file(&out_path);
         assert!(res.is_ok());
         let paths = res.unwrap();
         assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], "test_stop_out.ogg");
+        assert_eq!(paths[0], out_path_str);
     }
 }

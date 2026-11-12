@@ -15,10 +15,10 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use tauri::{AppHandle, Manager};
-use std::process::Command;
 use crate::utils::{validate_model_name, validate_path_in_library};
-use crate::whisperx::env::{get_env_path, get_binary_path};
+use crate::whisperx::env::{get_binary_path, get_env_path};
+use std::process::Command;
+use tauri::{AppHandle, Manager};
 
 /// Output result payload returned from running the WhisperX tool on a file.
 #[derive(serde::Serialize)]
@@ -90,18 +90,18 @@ pub fn build_whisperx_run_command(
             cmd.env("PATH", app_bin_dir);
         }
     }
-    
+
     cmd.arg(audio_path);
     cmd.arg("--model").arg(model);
-    
+
     if language != "auto" {
         cmd.arg("--language").arg(language);
     }
-    
+
     if !initial_prompt.is_empty() {
         cmd.arg("--initial_prompt").arg(initial_prompt);
     }
-    
+
     if temperature > 0.0 {
         cmd.arg("--temperature").arg(temperature.to_string());
     }
@@ -131,15 +131,15 @@ pub fn build_whisperx_run_command(
 
     cmd.arg("--output_format").arg("json");
     cmd.arg("--output_dir").arg(output_dir);
-    
+
     cmd
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn run_whisperx(
-    app_handle: AppHandle, 
-    audio_path: String, 
+    app_handle: AppHandle,
+    audio_path: String,
     output_dir: String,
     model: String,
     language: String,
@@ -153,11 +153,15 @@ pub async fn run_whisperx(
     min_speakers: i32,
     max_speakers: i32,
     no_align: bool,
-    log_path: Option<String>
+    log_path: Option<String>,
 ) -> Result<WhisperXOutput, String> {
     validate_model_name(&model)?;
-    let audio_path = validate_path_in_library(&audio_path)?.to_string_lossy().to_string();
-    let output_dir = validate_path_in_library(&output_dir)?.to_string_lossy().to_string();
+    let audio_path = validate_path_in_library(&audio_path)?
+        .to_string_lossy()
+        .to_string();
+    let output_dir = validate_path_in_library(&output_dir)?
+        .to_string_lossy()
+        .to_string();
 
     let env_path = get_env_path(&app_handle)?;
     let bin_path = get_binary_path(&env_path);
@@ -200,7 +204,11 @@ pub async fn run_whisperx(
     .map_err(|e| format!("Spawn blocking failed: {}", e))??;
 
     if let Some(path) = log_path {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             use std::io::Write;
             let _ = writeln!(f, "--- WHISPERX STDOUT ---");
             let _ = f.write_all(&output.stdout);
@@ -243,7 +251,10 @@ mod tests {
             true,
         );
 
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"audio.wav".to_string()));
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"base".to_string()));
@@ -276,7 +287,10 @@ mod tests {
             false,
         );
 
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(!args.contains(&"--language".to_string()));
         assert!(args.contains(&"--temperature".to_string()));
         assert!(args.contains(&"0.5".to_string()));

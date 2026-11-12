@@ -26,7 +26,7 @@ import { saveTranscript } from '../services/db';
 import { summarizeTranscript } from '../services/ollama';
 import { saveSummary } from '../services/db';
 import { getBaseName } from '../utils/path';
-import { BaseDirectory, writeTextFile } from '../lib/api';
+import { writeLibraryTextFile } from '../lib/api';
 
 export function AutomationRunner() {
   const __lib = useLibrarySettings();
@@ -105,7 +105,7 @@ export function AutomationRunner() {
                     
                     await saveTranscript(rec.id, result);
                     const baseName = getBaseName(rec.filename);
-                    await writeTextFile(`Epi Library/Transcriptions/${baseName}_transcript.txt`, result, { baseDir: BaseDirectory.Document });
+                    await writeLibraryTextFile('Transcriptions', `${baseName}_transcript.txt`, result);
                     ctx.removeTranscribingId(rec.id);
                     ctx.refreshLibrary(); // Progressive UI update
                   } catch (err) {
@@ -150,7 +150,7 @@ export function AutomationRunner() {
                     
                     await saveSummary(t.id, sum);
                     const baseName = getBaseName(rec.filename);
-                    await writeTextFile(`Epi Library/Summaries/${baseName}_summary.md`, sum, { baseDir: BaseDirectory.Document });
+                    await writeLibraryTextFile('Summaries', `${baseName}_summary.md`, sum);
                     ctx.removeSummarizingRecId(rec.id);
                     ctx.refreshLibrary();
                   }

@@ -78,50 +78,43 @@ export function LibraryTab() {
   }, [searchInput]);
 
   /**
-   * Deletes a recording from the local SQLite database and its associated assets from disk.
-   * Handles filesystem deletions gracefully to prevent UI crashes if individual files are missing.
+   * Deletes a recording's assets from disk and its associated record from the local SQLite database.
+   * Files are removed first so that the database record is only changed once the filesystem
+   * operation succeeded; a failure leaves the record in place and is reported to the user.
    */
   const handleDeleteOption = async (
     rec: LibraryRecording,
     option: 'everything' | 'audio' | 'transcript'
   ) => {
+    const deleteEverything = async () => {
+      // 1. Delete files on disk (missing files are ignored, other failures throw)
+      await invoke('delete_recording_files', { filename: rec.filename });
+      // 2. Delete DB record
+      await deleteRecordingDb(rec.id);
+      if (activeRecordingId === rec.id) {
+        await loadRecordingIntoAnalysis(null);
+      }
+    };
+
     try {
       if (option === 'everything') {
-        // 1. Delete DB record
-        await deleteRecordingDb(rec.id);
-        
-        if (activeRecordingId === rec.id) {
-          await loadRecordingIntoAnalysis(null);
-        }
-        
-        // 2. Delete files on disk using atomic Rust command
-        await invoke('delete_recording_files', { filename: rec.filename });
+        await deleteEverything();
       } else if (option === 'audio') {
         // Delete audio file only from disk using Rust command
         await invoke('delete_audio_file', { filename: rec.filename });
         
         // If it has no transcript, it has no files left -> delete entirely
         if (!rec.hasTranscript) {
-          await deleteRecordingDb(rec.id);
-          if (activeRecordingId === rec.id) {
-            await loadRecordingIntoAnalysis(null);
-          }
-          await invoke('delete_recording_files', { filename: rec.filename });
+          await deleteEverything();
         }
       } else if (option === 'transcript') {
-        // Delete transcript and summary from DB
-        await deleteTranscriptAndSummaryDb(rec.id);
-        
-        // Delete physical transcript/summary files using Rust command
+        // Delete physical transcript/summary files first, then the DB entries
         await invoke('delete_transcript_files', { filename: rec.filename });
+        await deleteTranscriptAndSummaryDb(rec.id);
         
         // If it has no audio, it has no files left -> delete entirely
         if (!rec.hasAudio) {
-          await deleteRecordingDb(rec.id);
-          if (activeRecordingId === rec.id) {
-            await loadRecordingIntoAnalysis(null);
-          }
-          await invoke('delete_recording_files', { filename: rec.filename });
+          await deleteEverything();
         } else {
           // Reset active analysis view if it's currently loaded
           if (activeRecordingId === rec.id) {
@@ -133,9 +126,11 @@ export function LibraryTab() {
       // Refresh
       await refreshLibrary();
       setConfirmDeleteId(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to perform deletion (${option}):`, err);
-      alert('Failed to perform deletion.');
+      alert(`Failed to perform deletion: ${err?.message || String(err)}`);
+      // Some files may have been removed before the failure; reflect the actual state.
+      await refreshLibrary().catch(console.error);
     }
   };
 
@@ -167,7 +162,8 @@ export function LibraryTab() {
       }
       
       if (targetName !== rec.filename) {
-        // Perform atomic rename on the backend in Rust
+        // Rename all files on disk first (rolled back by the backend on partial failure);
+        // the DB record is only updated once the filesystem rename succeeded.
         await invoke('rename_recording_files', { oldFilename: rec.filename, newFilename: targetName });
 
         try {

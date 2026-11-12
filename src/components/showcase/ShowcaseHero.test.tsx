@@ -13,7 +13,7 @@ describe('ShowcaseHero', () => {
   it('renders hero title, badge, logo, and call-to-action buttons', () => {
     render(<ShowcaseHero />);
 
-    expect(screen.getByText('Version 1.1.0 Release')).toBeInTheDocument();
+    expect(screen.getByText('Version 1.1.1 Release')).toBeInTheDocument();
     expect(screen.getByTestId('mock-epi-logo')).toBeInTheDocument();
     expect(screen.getByText('Meeting intelligence,')).toBeInTheDocument();
     expect(screen.getByText('running locally.')).toBeInTheDocument();
