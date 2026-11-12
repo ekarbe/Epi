@@ -33,6 +33,19 @@ mod secrets;
 mod utils;
 mod whisperx;
 
+/// Entry points for the backend-level end-to-end tests in `tests/`.
+///
+/// Re-exports the AppHandle-free core of the recording commands so an
+/// integration test can drive the real recording path (audio device ->
+/// ffmpeg -> `.ogg`) without a running Tauri application. Not part of the
+/// application's API.
+#[doc(hidden)]
+pub mod e2e {
+    pub use crate::audio::{
+        start_recording_inner, stop_recording_inner, AudioDeviceSelection, AudioState,
+    };
+}
+
 /// Calculates the total disk space (in bytes) occupied by files within the "Epi Library" directory.
 ///
 /// This function runs asynchronously on a blocking thread pool to avoid blocking the main event thread.
