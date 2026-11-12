@@ -838,22 +838,28 @@ mod tests {
 
         let child = std::process::Command::new(&fake_ffmpeg).spawn().unwrap();
 
+        // Write the fake recording into the temp dir so the test never leaves
+        // an artifact in the working directory (previously src-tauri/).
+        let out_path = temp_dir.join("epi_test_stop_out.ogg");
+        let out_path_str = out_path.to_string_lossy().to_string();
+
         let state = AudioState::default();
         {
             let mut guard = state.session.lock().unwrap();
             *guard = Some(RecordingSession {
                 process: child,
-                output_path: "test_stop_out.ogg".to_string(),
+                output_path: out_path_str.clone(),
                 _streams: vec![],
             });
         }
-        
-        std::fs::write("test_stop_out.ogg", vec![0u8; 1024]).unwrap();
+
+        std::fs::write(&out_path, vec![0u8; 1024]).unwrap();
 
         let res = stop_recording_inner(&state).await;
+        let _ = std::fs::remove_file(&out_path);
         assert!(res.is_ok());
         let paths = res.unwrap();
         assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], "test_stop_out.ogg");
+        assert_eq!(paths[0], out_path_str);
     }
 }
