@@ -262,6 +262,7 @@ export function LibraryTab() {
           <div style={{ position: 'relative', width: '300px' }}>
             <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
             <input
+              data-testid="library-search"
               type="text"
               placeholder="Search titles or tags..."
               value={searchInput}
@@ -294,7 +295,7 @@ export function LibraryTab() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {paginatedRecordings.map((rec) => (
-              <div key={rec.id} style={{
+              <div key={rec.id} data-testid="library-item" data-recording-id={rec.id} data-filename={rec.filename} style={{
                 background: 'var(--card-bg-solid)',
                 border: '1px solid var(--card-border)',
                 borderRadius: '1rem',
@@ -309,6 +310,7 @@ export function LibraryTab() {
                   {editingId === rec.id ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                       <input
+                        data-testid="rename-input"
                         type="text"
                         value={editFilename}
                         onChange={(e) => setEditFilename(e.target.value)}
@@ -341,7 +343,7 @@ export function LibraryTab() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                      <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{rec.filename.replace(/\.ogg$/i, '')}</h3>
+                      <h3 data-testid="library-item-title" style={{ margin: 0, fontSize: '1.1rem' }}>{rec.filename.replace(/\.ogg$/i, '')}</h3>
                       <button
                         data-testid={`edit-btn-${rec.id}`}
                         onClick={() => {
@@ -372,7 +374,7 @@ export function LibraryTab() {
                   
                   <div style={{ display: 'flex', gap: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', alignItems: 'center' }}>
                     <span>End Time: {formatTimestamp(rec.timestamp)}</span>
-                    <span>{rec.duration}s</span>
+                    <span data-testid="library-item-duration">{rec.duration}s</span>
                     
 
                     
@@ -426,7 +428,7 @@ export function LibraryTab() {
                   </button>
                   
                   {confirmDeleteId === rec.id ? (
-                    <div style={{
+                    <div data-testid="delete-options" style={{
                       position: 'absolute',
                       right: '1.25rem',
                       top: '100%',
@@ -445,6 +447,7 @@ export function LibraryTab() {
                       <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', padding: '0.25rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Delete Options</div>
                       
                       <button
+                        data-testid="delete-everything-btn"
                         onClick={() => handleDeleteOption(rec, 'everything')}
                         className="btn-outline"
                         style={{
@@ -501,6 +504,7 @@ export function LibraryTab() {
                       <div style={{ height: '1px', background: 'var(--card-border)', margin: '0.25rem 0' }}></div>
                       
                       <button
+                        data-testid="delete-cancel-btn"
                         onClick={() => setConfirmDeleteId(null)}
                         className="btn-primary"
                         style={{

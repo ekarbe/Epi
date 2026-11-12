@@ -27,6 +27,7 @@ export function Navbar() {
       <div className="sticky-pill-container">
         <div className="tab-container">
           <button 
+            data-testid="tab-studio"
             className={`tab-btn ${activeTab === 'studio' ? 'active' : ''}`}
             onClick={() => setActiveTab('studio')}
           >
@@ -34,6 +35,7 @@ export function Navbar() {
             Studio
           </button>
           <button 
+            data-testid="tab-analysis"
             className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`}
             onClick={() => setActiveTab('analysis')}
           >
@@ -41,6 +43,7 @@ export function Navbar() {
             Analysis
           </button>
           <button 
+            data-testid="tab-library"
             className={`tab-btn ${activeTab === 'library' ? 'active' : ''}`}
             onClick={() => setActiveTab('library')}
           >
@@ -48,6 +51,7 @@ export function Navbar() {
             Library
           </button>
           <button 
+            data-testid="tab-engine"
             className={`tab-btn ${activeTab === 'engine' ? 'active' : ''}`}
             onClick={() => setActiveTab('engine')}
           >
