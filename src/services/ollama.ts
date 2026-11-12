@@ -15,7 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { invoke, isTauri } from '../lib/api';
+import { invoke, isTauri, listen } from '../lib/api';
 
 
 
@@ -125,7 +125,25 @@ export async function summarizeTranscript(
 }
 
 /**
+ * Event emitted by the Rust backend while `pull_ollama_model` is running.
+ */
+export const OLLAMA_PULL_PROGRESS_EVENT = 'ollama-pull-progress';
+
+/**
+ * Payload of the {@link OLLAMA_PULL_PROGRESS_EVENT} event.
+ */
+export interface OllamaPullProgress {
+  model: string;
+  percent: number | null;
+  status: string;
+}
+
+/**
  * Pulls a model from the Ollama registry with streaming progress.
+ *
+ * In the desktop app the download is performed by the Rust backend (`pull_ollama_model`),
+ * which streams Ollama's progress and emits {@link OLLAMA_PULL_PROGRESS_EVENT} events.
+ * In the web showcase the download is simulated.
  * 
  * @param ollamaUrl Base URL of local Ollama (e.g. http://localhost:11434).
  * @param modelName Name of the model to pull (e.g. 'llama3').
@@ -136,66 +154,34 @@ export async function pullModel(
   modelName: string,
   onProgress: (percent: number) => void
 ): Promise<void> {
-  const url = `${ollamaUrl}/api/pull`;
-  
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: modelName })
+  if (!isTauri) {
+    for (const percent of [0, 25, 50, 75, 100]) {
+      onProgress(percent);
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    return;
+  }
+
+  const unlisten = await listen<OllamaPullProgress>(OLLAMA_PULL_PROGRESS_EVENT, (event) => {
+    const progress = event.payload;
+    if (progress && progress.model === modelName && typeof progress.percent === 'number') {
+      onProgress(progress.percent);
+    }
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to pull model: ${response.statusText}`);
-  }
-  
-  if (!response.body) {
-    throw new Error("ReadableStream not supported by response");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (line.trim()) {
-        try {
-          const json = JSON.parse(line);
-          if (json.status === "success") {
-            onProgress(100);
-          } else if (json.total && json.completed) {
-            const percent = Math.floor((json.completed / json.total) * 100);
-            onProgress(percent);
-          }
-        } catch (e) {
-          console.warn("Failed to parse pull stream line:", line);
-        }
-      }
-    }
+  try {
+    await invoke('pull_ollama_model', { ollamaUrl, modelName });
+  } finally {
+    unlisten();
   }
 }
 
 /**
- * Deletes a model from the Ollama registry.
+ * Deletes a model from the Ollama registry via the Rust backend (`delete_ollama_model`).
  * 
  * @param ollamaUrl Base URL of local Ollama (e.g. http://localhost:11434).
  * @param modelName Name of the model to delete.
  */
 export async function deleteModel(ollamaUrl: string, modelName: string): Promise<void> {
-  const url = `${ollamaUrl}/api/delete`;
-  const response = await fetch(url, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: modelName })
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to delete model: ${response.statusText}`);
-  }
+  await invoke('delete_ollama_model', { ollamaUrl, modelName });
 }

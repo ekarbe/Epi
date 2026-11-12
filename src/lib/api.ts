@@ -110,6 +110,12 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       return undefined as any;
     case 'get_local_models':
       return ['llama3.2', 'mistral', 'qwen2.5'] as any;
+    case 'pull_ollama_model':
+      await delay(1500);
+      return undefined as any;
+    case 'delete_ollama_model':
+      await delay(300);
+      return undefined as any;
     case 'generate_local_summary':
       await delay(2000);
       return `# Local Meeting Summary\n\n- **Status**: Generated locally using a simulated LLM.\n- **Note**: This is a static mock response for the local model.` as any;

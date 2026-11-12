@@ -14,11 +14,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getAvailableModels, summarizeTranscript } from './ollama';
-import { invoke } from '../lib/api';
+import { getAvailableModels, summarizeTranscript, pullModel, deleteModel, OLLAMA_PULL_PROGRESS_EVENT } from './ollama';
+import { invoke, listen } from '../lib/api';
 
 vi.mock('../lib/api', () => ({
   invoke: vi.fn(),
+  listen: vi.fn(),
   isTauri: true,
 }));
 
@@ -82,6 +83,54 @@ describe('ollama service', () => {
 
       await expect(summarizeTranscript('content', 'summary: {{transcript}}'))
         .rejects.toThrow(/Model not found/);
+    });
+  });
+
+  describe('pullModel', () => {
+    it('invokes the backend and forwards progress for the requested model only', async () => {
+      const unlisten = vi.fn();
+      let handler: (event: { payload: any }) => void = () => {};
+      vi.mocked(listen).mockImplementation(async (_event: string, cb: any) => {
+        handler = cb;
+        return unlisten;
+      });
+      vi.mocked(invoke).mockImplementation(async () => {
+        handler({ payload: { model: 'llama3', percent: null, status: 'pulling manifest' } });
+        handler({ payload: { model: 'llama3', percent: 40, status: 'pulling abc' } });
+        handler({ payload: { model: 'mistral', percent: 90, status: 'pulling def' } });
+        handler({ payload: { model: 'llama3', percent: 100, status: 'success' } });
+        return undefined;
+      });
+
+      const onProgress = vi.fn();
+      await pullModel('http://custom:1234', 'llama3', onProgress);
+
+      expect(listen).toHaveBeenCalledWith(OLLAMA_PULL_PROGRESS_EVENT, expect.any(Function));
+      expect(invoke).toHaveBeenCalledWith('pull_ollama_model', { ollamaUrl: 'http://custom:1234', modelName: 'llama3' });
+      expect(onProgress.mock.calls).toEqual([[40], [100]]);
+      expect(unlisten).toHaveBeenCalledTimes(1);
+    });
+
+    it('unlistens and rethrows when the backend fails', async () => {
+      const unlisten = vi.fn();
+      vi.mocked(listen).mockResolvedValue(unlisten);
+      vi.mocked(invoke).mockRejectedValue('pull model manifest: file does not exist');
+
+      await expect(pullModel('http://url', 'nope', vi.fn())).rejects.toBe('pull model manifest: file does not exist');
+      expect(unlisten).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('deleteModel', () => {
+    it('invokes the backend delete command', async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      await deleteModel('http://url', 'llama3');
+      expect(invoke).toHaveBeenCalledWith('delete_ollama_model', { ollamaUrl: 'http://url', modelName: 'llama3' });
+    });
+
+    it('propagates backend errors', async () => {
+      vi.mocked(invoke).mockRejectedValue(new Error('model not found'));
+      await expect(deleteModel('http://url', 'ghost')).rejects.toThrow('model not found');
     });
   });
 });

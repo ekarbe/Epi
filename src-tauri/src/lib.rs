@@ -336,6 +336,8 @@ pub fn run() {
             cloud_llm::generate_cloud_summary,
             local_llm::get_local_models,
             local_llm::generate_local_summary,
+            local_llm::pull_ollama_model,
+            local_llm::delete_ollama_model,
             get_library_size,
             get_storage_breakdown,
             get_available_disk_space,
