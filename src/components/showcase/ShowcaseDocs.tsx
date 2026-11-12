@@ -146,7 +146,7 @@ npx tsc --noEmit`}
                   <li><strong>Transcriptions:</strong> ~/Documents/Epi Library/Transcriptions/ (.txt & .json)</li>
                   <li><strong>Summaries:</strong> ~/Documents/Epi Library/Summaries/ (.md)</li>
                   <li><strong>Logs:</strong> ~/Documents/Epi Library/Logs/ (app.log & _ffmpeg.log)</li>
-                  <li><strong>Database:</strong> {"{AppData}/epi_meta.db"} (SQLite)</li>
+                  <li><strong>Database:</strong> {"{AppConfig}/epi_meta.db"} (SQLite)</li>
                   <li><strong>WhisperX Venv:</strong> {"{AppData}/whisperx_env/"} (Python venv)</li>
                   <li><strong>Managed FFmpeg:</strong> {"{AppData}/ffmpeg/"} (Standalone binary)</li>
                 </ul>

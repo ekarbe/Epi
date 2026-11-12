@@ -10,77 +10,40 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { invoke } from '../../lib/api';
 import { saveSummary, updateSummary, getSummaryForTranscript } from './summaries';
-import { getDb } from './core';
 
-vi.mock('./core', () => ({
-  getDb: vi.fn(),
+vi.mock('../../lib/api', () => ({
+  invoke: vi.fn(),
 }));
 
 describe('summaries db service', () => {
-  const mockDb = {
-    execute: vi.fn(),
-    select: vi.fn(),
-  };
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockDb.select.mockResolvedValue([]);
-    vi.mocked(getDb).mockResolvedValue(mockDb as any);
+    vi.mocked(invoke).mockReset();
   });
 
-  describe('saveSummary', () => {
-    it('executes insert query if not exists', async () => {
-      mockDb.execute.mockResolvedValue({ lastInsertId: 15 });
-      const id = await saveSummary(10, 'Summary text');
-      expect(id).toBe(15);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'INSERT INTO Summaries (transcript_id, summary_text) VALUES ($1, $2)',
-        [10, 'Summary text']
-      );
-    });
-
-    it('executes update query if exists', async () => {
-      mockDb.select.mockResolvedValue([{ id: 15, summary_text: 'Old' }]);
-      const id = await saveSummary(10, 'Summary text');
-      expect(id).toBe(15);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'UPDATE Summaries SET summary_text = $1 WHERE id = $2',
-        ['Summary text', 15]
-      );
-    });
+  it('saveSummary returns the summary id', async () => {
+    vi.mocked(invoke).mockResolvedValue(3);
+    expect(await saveSummary(1, 'sum')).toBe(3);
+    expect(invoke).toHaveBeenCalledWith('db_save_summary', { transcriptId: 1, summaryText: 'sum' });
   });
 
-  describe('updateSummary', () => {
-    it('executes update query', async () => {
-      await updateSummary(15, 'New summary');
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'UPDATE Summaries SET summary_text = $1 WHERE id = $2',
-        ['New summary', 15]
-      );
-    });
+  it('updateSummary passes id and text', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await updateSummary(2, 'new');
+    expect(invoke).toHaveBeenCalledWith('db_update_summary', { id: 2, summaryText: 'new' });
   });
 
-  describe('getSummaryForTranscript', () => {
-    it('returns null if no summary', async () => {
-      mockDb.select.mockResolvedValue([]);
-      const result = await getSummaryForTranscript(10);
-      expect(result).toBeNull();
-    });
-
-    it('returns formatted summary', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 15, summary_text: 'Summary text' }
-      ]);
-      const result = await getSummaryForTranscript(10);
-      expect(result).toEqual({
-        id: 15,
-        summaryText: 'Summary text'
-      });
-    });
+  it('getSummaryForTranscript returns the summary or null', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ id: 1, summaryText: 's' }).mockResolvedValueOnce(null);
+    expect(await getSummaryForTranscript(9)).toEqual({ id: 1, summaryText: 's' });
+    expect(await getSummaryForTranscript(10)).toBeNull();
+    expect(invoke).toHaveBeenCalledWith('db_get_summary_for_transcript', { transcriptId: 9 });
   });
 });

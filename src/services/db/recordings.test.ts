@@ -10,140 +10,78 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { saveRecording, getLibraryRecordings, getLibraryRecordingById, deleteRecordingDb, updateRecording, getRawRecordingById, getRecordingsOlderThan30Days, updateRecordingTags } from './recordings';
-import { getDb } from './core';
+import { invoke } from '../../lib/api';
+import {
+  saveRecording, getLibraryRecordings, getLibraryRecordingById, deleteRecordingDb, updateRecording,
+  getRawRecordingById, getRecordingsOlderThan30Days, updateRecordingTags,
+} from './recordings';
 
-vi.mock('./core', () => ({
-  getDb: vi.fn(),
+vi.mock('../../lib/api', () => ({
+  invoke: vi.fn(),
 }));
 
 describe('recordings db service', () => {
-  const mockDb = {
-    execute: vi.fn(),
-    select: vi.fn(),
-  };
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as any);
+    vi.mocked(invoke).mockReset();
   });
 
-  describe('saveRecording', () => {
-    it('saves with timestamp', async () => {
-      mockDb.execute.mockResolvedValue({ lastInsertId: 1 });
-      const id = await saveRecording('test.ogg', 120, 'Meeting', '2026-07-08 12:00:00');
-      expect(id).toBe(1);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO Recordings (filename, duration, label, timestamp, tags)'),
-        ['test.ogg', 120, 'Meeting', '2026-07-08 12:00:00']
-      );
-    });
-
-    it('saves without timestamp', async () => {
-      mockDb.execute.mockResolvedValue({ lastInsertId: 2 });
-      const id = await saveRecording('test2.ogg', 60, 'Call');
-      expect(id).toBe(2);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO Recordings (filename, duration, label, tags)'),
-        ['test2.ogg', 60, 'Call']
-      );
+  it('saveRecording passes the timestamp when given', async () => {
+    vi.mocked(invoke).mockResolvedValue(1);
+    expect(await saveRecording('test.ogg', 120, 'Meeting', '2026-07-08 12:00:00')).toBe(1);
+    expect(invoke).toHaveBeenCalledWith('db_save_recording', {
+      filename: 'test.ogg', duration: 120, label: 'Meeting', timestamp: '2026-07-08 12:00:00',
     });
   });
 
-  describe('getLibraryRecordings', () => {
-    it('returns formatted library recordings', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts1', label: 'L1', hasTranscript: 1, tags: '["urgent"]' },
-        { id: 2, filename: 'b.ogg', duration: 20, timestamp: 'ts2', label: null, hasTranscript: 0, tags: null }
-      ]);
-      const result = await getLibraryRecordings();
-      expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({
-        id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts1', label: 'L1', hasTranscript: true, tags: ['urgent']
-      });
-      expect(result[1].tags).toEqual([]);
-      expect(result[1].hasTranscript).toBe(false);
+  it('saveRecording defaults label and timestamp to null', async () => {
+    vi.mocked(invoke).mockResolvedValue(2);
+    expect(await saveRecording('test2.ogg', 60)).toBe(2);
+    expect(invoke).toHaveBeenCalledWith('db_save_recording', {
+      filename: 'test2.ogg', duration: 60, label: null, timestamp: null,
     });
   });
 
-  describe('getLibraryRecordingById', () => {
-    it('returns null if not found', async () => {
-      mockDb.select.mockResolvedValue([]);
-      const result = await getLibraryRecordingById(99);
-      expect(result).toBeNull();
-    });
-
-    it('returns formatted recording', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts1', label: 'L1', hasTranscript: 1 }
-      ]);
-      const result = await getLibraryRecordingById(1);
-      expect(result).toEqual({
-        id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts1', label: 'L1', hasTranscript: true
-      });
-    });
+  it('getLibraryRecordings returns the backend list unchanged', async () => {
+    const list = [{ id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts', label: null, hasTranscript: true, tags: ['x'] }];
+    vi.mocked(invoke).mockResolvedValue(list);
+    expect(await getLibraryRecordings()).toEqual(list);
+    expect(invoke).toHaveBeenCalledWith('db_get_library_recordings');
   });
 
-  describe('deleteRecordingDb', () => {
-    it('executes delete query', async () => {
-      await deleteRecordingDb(5);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'DELETE FROM Recordings WHERE id = $1',
-        [5]
-      );
-    });
+  it('lookups by id pass the id and return null when missing', async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    expect(await getLibraryRecordingById(5)).toBeNull();
+    expect(invoke).toHaveBeenCalledWith('db_get_library_recording_by_id', { id: 5 });
+    expect(await getRawRecordingById(6)).toBeNull();
+    expect(invoke).toHaveBeenCalledWith('db_get_raw_recording_by_id', { id: 6 });
   });
 
-  describe('updateRecording', () => {
-    it('executes update query', async () => {
-      await updateRecording(5, 'new.ogg', 'Label');
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'UPDATE Recordings SET filename = $1, label = $2 WHERE id = $3',
-        ['new.ogg', 'Label', 5]
-      );
-    });
+  it('getRecordingsOlderThan30Days invokes its command', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    expect(await getRecordingsOlderThan30Days()).toEqual([]);
+    expect(invoke).toHaveBeenCalledWith('db_get_recordings_older_than_30_days');
   });
 
-  describe('getRawRecordingById', () => {
-    it('returns null if not found', async () => {
-      mockDb.select.mockResolvedValue([]);
-      const result = await getRawRecordingById(99);
-      expect(result).toBeNull();
-    });
-
-    it('returns raw recording', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts', group_id: 2, label: 'L' }
-      ]);
-      const result = await getRawRecordingById(1);
-      expect(result).toEqual({
-        id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts', groupId: 2, label: 'L'
-      });
-    });
+  it('mutations pass their arguments', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await deleteRecordingDb(1);
+    await updateRecording(2, 'new.ogg', null);
+    await updateRecordingTags(3, ['a', 'b']);
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['db_delete_recording', { id: 1 }],
+      ['db_update_recording', { id: 2, filename: 'new.ogg', label: null }],
+      ['db_update_recording_tags', { id: 3, tags: ['a', 'b'] }],
+    ]);
   });
 
-  describe('getRecordingsOlderThan30Days', () => {
-    it('returns old recordings', async () => {
-      mockDb.select.mockResolvedValue([
-        { id: 1, filename: 'a.ogg', duration: 10, timestamp: 'ts1', label: 'L1', hasTranscript: 1 }
-      ]);
-      const result = await getRecordingsOlderThan30Days();
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(1);
-    });
-  });
-
-  describe('updateRecordingTags', () => {
-    it('executes update query with json tags', async () => {
-      await updateRecordingTags(1, ['tag1', 'tag2']);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        'UPDATE Recordings SET tags = $1 WHERE id = $2',
-        ['["tag1","tag2"]', 1]
-      );
-    });
+  it('propagates backend errors', async () => {
+    vi.mocked(invoke).mockRejectedValue('Database error: disk I/O error');
+    await expect(getLibraryRecordings()).rejects.toBe('Database error: disk I/O error');
   });
 });

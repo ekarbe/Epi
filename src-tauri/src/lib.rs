@@ -30,6 +30,7 @@ mod secrets;
 pub mod process_manager;
 mod utils;
 mod checksum;
+mod db;
 pub mod ffmpeg;
 
 /// Calculates the total disk space (in bytes) occupied by files within the "Epi Library" directory.
@@ -284,7 +285,8 @@ async fn delete_transcript_files(filename: String) -> Result<(), String> {
 /// Sets up plugins, managed states, commands, and exit hooks.
 ///
 /// # Side Effects
-/// * Initializes default Tauri plugins (OS, Dialog, FS, SQL, Store).
+/// * Initializes default Tauri plugins (OS, Dialog, FS, Store).
+/// * Registers the metadata database (`epi_meta.db` in the app config directory) as managed state.
 /// * Establishes app state management for audio and background child processes.
 /// * Registers Tauri IPC command handlers.
 /// * Spawns the main window and hooks into the `Exit` run event to clean up and terminate child processes (ffmpeg, Python venv).
@@ -310,11 +312,17 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(audio::AudioState::default())
         .manage(whisperx::LiveTranscriptionState(std::sync::Mutex::new(None)))
         .manage(process_manager::ProcessRegistry::new())
+        .setup(|app| {
+            use tauri::Manager;
+            // Same location tauri-plugin-sql used for `sqlite:epi_meta.db`.
+            let db_path = app.path().app_config_dir()?.join(db::DB_FILE_NAME);
+            app.manage(db::Db::new(db_path));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             audio::get_audio_devices,
             audio::start_recording,
@@ -350,7 +358,39 @@ pub fn run() {
             ffmpeg::check_ffmpeg_installation,
             secrets::get_secret,
             secrets::set_secret,
-            secrets::delete_secret
+            secrets::delete_secret,
+            db::db_init,
+            db::recordings::db_save_recording,
+            db::recordings::db_get_library_recordings,
+            db::recordings::db_get_library_recording_by_id,
+            db::recordings::db_delete_recording,
+            db::recordings::db_update_recording,
+            db::recordings::db_get_raw_recording_by_id,
+            db::recordings::db_get_recordings_older_than_30_days,
+            db::recordings::db_update_recording_tags,
+            db::transcripts::db_save_transcript,
+            db::transcripts::db_update_transcript,
+            db::transcripts::db_get_transcript_for_recording,
+            db::transcripts::db_delete_transcript_and_summary,
+            db::summaries::db_save_summary,
+            db::summaries::db_update_summary,
+            db::summaries::db_get_summary_for_transcript,
+            db::prompts::db_get_prompts,
+            db::prompts::db_create_prompt,
+            db::prompts::db_update_prompt,
+            db::prompts::db_delete_prompt,
+            db::prompts::db_ensure_default_prompts,
+            db::tags::db_get_tags,
+            db::tags::db_save_tag_context,
+            db::tags::db_ensure_tag_exists,
+            db::tags::db_delete_tag,
+            db::glossary::db_get_glossary,
+            db::glossary::db_save_glossary_term,
+            db::glossary::db_delete_glossary_term,
+            db::automations::db_get_automations,
+            db::automations::db_create_automation,
+            db::automations::db_delete_automation,
+            db::stats::db_get_stats
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

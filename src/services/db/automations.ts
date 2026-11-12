@@ -15,7 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { getDb } from './core';
+import { invoke } from '../../lib/api';
 
 export interface Automation {
   id: number;
@@ -25,37 +25,17 @@ export interface Automation {
   action: string;
 }
 
-interface RawAutomationRow {
-  id: number;
-  name: string;
-  trigger_time: string;
-  timerange_hours: number;
-  action: string;
-}
-
+/** All automations, newest first. */
 export async function getAutomations(): Promise<Automation[]> {
-  const db = await getDb();
-  const rawRows = await db.select<RawAutomationRow[]>('SELECT * FROM Automations ORDER BY id DESC');
-  
-  return rawRows.map(row => ({
-    id: row.id,
-    name: row.name,
-    triggerTime: row.trigger_time,
-    timerangeHours: row.timerange_hours,
-    action: row.action
-  }));
+  return invoke<Automation[]>('db_get_automations');
 }
 
+/** Inserts an automation and returns its id. */
 export async function createAutomation(name: string, triggerTime: string, timerangeHours: number, action: string): Promise<number> {
-  const db = await getDb();
-  const result = await db.execute(
-    'INSERT INTO Automations (name, trigger_time, timerange_hours, action) VALUES ($1, $2, $3, $4)',
-    [name, triggerTime, timerangeHours, action]
-  );
-  return result.lastInsertId || 0;
+  return invoke<number>('db_create_automation', { name, triggerTime, timerangeHours, action });
 }
 
+/** Deletes an automation. */
 export async function deleteAutomation(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute('DELETE FROM Automations WHERE id = $1', [id]);
+  await invoke('db_delete_automation', { id });
 }

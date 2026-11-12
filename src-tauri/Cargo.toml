@@ -31,7 +31,8 @@ tauri-plugin-dialog = "2.7.1"
 tauri-plugin-os = "2.3.2"
 dirs = "5.0.1"
 walkdir = "2.5.0"
-tauri-plugin-sql = { version = "2.4.0", features = ["sqlite"] }
+# SQLite metadata database (epi_meta.db), bundled so no system library is needed.
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 tauri-plugin-store = "2.4.3"
 reqwest = { version = "0.13.4", features = ["json", "multipart", "stream"] }
 base64 = "0.22.1"

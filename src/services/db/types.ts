@@ -48,16 +48,6 @@ export interface LibraryRecording {
   tags?: string[];
 }
 
-export interface LibraryRow {
-  id: number;
-  filename: string;
-  duration: number;
-  timestamp: string;
-  label: string | null;
-  hasTranscript: number;
-  tags?: string;
-}
-
 export interface Tag {
   name: string;
   context: string;
@@ -66,35 +56,4 @@ export interface Tag {
 export interface GlossaryTerm {
   term: string;
   meaning: string;
-}
-
-export interface TableInfoRow {
-  cid: number;
-  name: string;
-  type: string;
-  notnull: number;
-  dflt_value: string | null;
-  pk: number;
-}
-
-export interface RawTranscriptRow {
-  id: number;
-  recording_id: number;
-  text_content: string;
-  diarized_json: string | null;
-}
-
-export interface RawRecordingRow {
-  id: number;
-  filename: string;
-  duration: number;
-  timestamp: string;
-  group_id: number | null;
-  label: string | null;
-  tags: string;
-}
-
-export interface RawSummaryRow {
-  id: number;
-  summary_text: string;
 }

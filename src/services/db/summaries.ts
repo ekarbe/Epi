@@ -15,38 +15,23 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-import { getDb } from './core';
-import { Summary, RawSummaryRow } from './types';
+import { invoke } from '../../lib/api';
+import { Summary } from './types';
 
+/**
+ * Stores the summary of a transcript, updating the existing summary if there
+ * is one. Returns the summary id.
+ */
 export async function saveSummary(transcriptId: number, summaryText: string): Promise<number> {
-  const existing = await getSummaryForTranscript(transcriptId);
-  if (existing) {
-    await updateSummary(existing.id, summaryText);
-    return existing.id;
-  }
-  const db = await getDb();
-  const result = await db.execute(
-    'INSERT INTO Summaries (transcript_id, summary_text) VALUES ($1, $2)',
-    [transcriptId, summaryText]
-  );
-  return result.lastInsertId || 0;
+  return invoke<number>('db_save_summary', { transcriptId, summaryText });
 }
 
+/** Replaces the text of a summary. */
 export async function updateSummary(id: number, summaryText: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    'UPDATE Summaries SET summary_text = $1 WHERE id = $2',
-    [summaryText, id]
-  );
+  await invoke('db_update_summary', { id, summaryText });
 }
 
+/** The summary of a transcript, or `null` if it has none. */
 export async function getSummaryForTranscript(tId: number): Promise<Pick<Summary, 'id' | 'summaryText'> | null> {
-  const db = await getDb();
-  const rawRows = await db.select<RawSummaryRow[]>('SELECT id, summary_text FROM Summaries WHERE transcript_id = $1', [tId]);
-  if (rawRows.length === 0) return null;
-  const row = rawRows[0];
-  return {
-    id: row.id,
-    summaryText: row.summary_text
-  };
+  return invoke<Pick<Summary, 'id' | 'summaryText'> | null>('db_get_summary_for_transcript', { transcriptId: tId });
 }

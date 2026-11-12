@@ -100,7 +100,7 @@ Epi is organized into four core workspace tabs:
 | **Backend Core** | Rust 2021 Edition · Tokio · `sysinfo` | Async command dispatch, disk space check, process supervision |
 | **Audio Engine** | `cpal` · `ffmpeg` (TCP Loopback) | Device enumeration, audio streaming, Opus `.ogg` encoding |
 | **Local AI Engine** | WhisperX (Python 3.10+ venv) · Ollama Daemon | Offline speech recognition & LLM summarization |
-| **Storage & Security** | SQLite (`tauri-plugin-sql`) · OS keyring (`keyring` crate) | Relational metadata storage & secret storage in the system keychain |
+| **Storage & Security** | SQLite (`rusqlite`, bundled) · OS keyring (`keyring` crate) | Relational metadata storage behind typed Rust commands & secret storage in the system keychain |
 
 ---
 
@@ -115,7 +115,7 @@ Epi is organized into four core workspace tabs:
                                            v
 +-----------------------------------------------------------------------------------+
 |                                RUST TAURI BACKEND                                 |
-|   lib.rs  <-->  audio/  <-->  whisperx/  <-->  cloud_llm/  <-->  local_llm/       |
+|   lib.rs <--> db/ <--> audio/ <--> whisperx/ <--> cloud_llm/ <--> local_llm/      |
 +---------+--------------------+---------------------+------------------------------+
           |                    |                     |
           v                    v                     v
@@ -128,7 +128,7 @@ Epi is organized into four core workspace tabs:
                                | File System / SQLite
                                v
    +-----------------------------------------------------------------+
-   | LOCAL STORAGE: ~/Documents/Epi Library/ & AppData/epi_meta.db   |
+   | LOCAL STORAGE: ~/Documents/Epi Library/ & AppConfig/epi_meta.db |
    +-----------------------------------------------------------------+
 ```
 
@@ -193,7 +193,7 @@ npm run tauri build
 | Transcripts | `~/Documents/Epi Library/Transcriptions/` | Raw text (`.txt`) and word-timestamp JSON (`.json`) |
 | Summaries | `~/Documents/Epi Library/Summaries/` | Markdown (`.md`) LLM-generated summaries |
 | Application Logs | `~/Documents/Epi Library/Logs/` | Process logs (`app.log`, `_ffmpeg.log`) |
-| Database | `{AppData}/epi_meta.db` | SQLite metadata database (`tauri-plugin-sql`) |
+| Database | `{AppConfig}/epi_meta.db` | SQLite metadata database (`rusqlite`), accessed only through the Rust `db_*` commands; schema versioned with `PRAGMA user_version` |
 | API Keys & HF Token | OS keyring (service `com.ekarbe.epi`) | macOS Keychain, Windows Credential Manager, or Linux Secret Service |
 | WhisperX Venv | `{AppData}/whisperx_env/` | Isolated Python virtual environment |
 | Local FFmpeg | `{AppData}/ffmpeg/` | Managed standalone FFmpeg binary |

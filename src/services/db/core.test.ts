@@ -10,80 +10,44 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { initDb } from './core';
-import { MockDatabase } from '../../lib/api';
 
 vi.mock('../../lib/api', () => ({
-  isTauri: false,
-  Database: {
-    load: vi.fn(),
-  },
-  MockDatabase: {
-    load: vi.fn(),
-  },
+  invoke: vi.fn(),
 }));
+
+/** Loads fresh copies of the core module and the mocked api (no cached init promise). */
+async function load() {
+  vi.resetModules();
+  const { initDb } = await import('./core');
+  const { invoke } = await import('../../lib/api');
+  return { initDb, invoke: vi.mocked(invoke) };
+}
 
 describe('db core', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('initializes database and runs migrations', async () => {
-    const mockExecute = vi.fn().mockResolvedValue(null);
-    const mockSelect = vi.fn().mockResolvedValue([{ name: 'id' }]); // Missing 'label' column to trigger migration
-
-    const mockDbInstance = {
-      execute: mockExecute,
-      select: mockSelect,
-    };
-
-    vi.mocked(MockDatabase.load).mockResolvedValue(mockDbInstance as any);
-
-    const db = await initDb();
-
-    expect(MockDatabase.load).toHaveBeenCalledWith('sqlite:epi_meta.db');
-    expect(mockExecute).toHaveBeenCalledWith('PRAGMA foreign_keys = ON;');
-    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE IF NOT EXISTS Recordings'));
-    expect(mockSelect).toHaveBeenCalledWith('PRAGMA table_info(Recordings)');
-    expect(mockExecute).toHaveBeenCalledWith('ALTER TABLE Recordings ADD COLUMN label TEXT');
-    expect(db).toBeDefined();
+  it('opens the database through db_init once', async () => {
+    const { initDb, invoke } = await load();
+    invoke.mockResolvedValue(undefined);
+    await Promise.all([initDb(), initDb()]);
+    await initDb();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('db_init');
   });
 
-  it('handles migration errors gracefully', async () => {
-    vi.resetModules();
-    const { getDb: newGetDb } = await import('./core');
-    const { MockDatabase: NewMockDatabase } = await import('../../lib/api');
-
-    const mockExecute = vi.fn().mockImplementation((query) => {
-      if (query.includes('ALTER TABLE Recordings ADD COLUMN tags')) {
-        return Promise.reject(new Error('duplicate column name'));
-      }
-      return Promise.resolve(null);
-    });
-    const mockSelect = vi.fn().mockResolvedValue([{ name: 'label' }]);
-
-    const mockDbInstance = {
-      execute: mockExecute,
-      select: mockSelect,
-    };
-
-    vi.mocked(NewMockDatabase.load).mockResolvedValue(mockDbInstance as any);
-
-    const db = await newGetDb();
-    expect(db).toBeDefined();
-  });
-
-  it('throws error if database load fails', async () => {
-    vi.resetModules();
-    const { initDb: newInitDb } = await import('./core');
-    const { MockDatabase: NewMockDatabase } = await import('../../lib/api');
-
-    vi.mocked(NewMockDatabase.load).mockRejectedValue(new Error('Load failed'));
-
-    await expect(newInitDb()).rejects.toThrow('Load failed');
+  it('rejects with the backend error and allows a retry', async () => {
+    const { initDb, invoke } = await load();
+    invoke.mockRejectedValueOnce('Could not open database').mockResolvedValueOnce(undefined);
+    await expect(initDb()).rejects.toBe('Could not open database');
+    await expect(initDb()).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

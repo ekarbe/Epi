@@ -10,44 +10,27 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { invoke } from '../../lib/api';
 import { getStats } from './stats';
-import { getDb } from './core';
 
-vi.mock('./core', () => ({
-  getDb: vi.fn(),
+vi.mock('../../lib/api', () => ({
+  invoke: vi.fn(),
 }));
 
 describe('stats db service', () => {
-  const mockDb = {
-    execute: vi.fn(),
-    select: vi.fn(),
-  };
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as any);
+    vi.mocked(invoke).mockReset();
   });
 
-  describe('getStats', () => {
-    it('returns combined counts', async () => {
-      mockDb.select
-        .mockResolvedValueOnce([{ count: 10 }]) // recordings
-        .mockResolvedValueOnce([{ count: 5 }]); // transcripts
-      
-      const result = await getStats();
-      expect(result).toEqual({ recordingsCount: 10, transcriptsCount: 5 });
-      expect(mockDb.select).toHaveBeenCalledTimes(2);
-    });
-
-    it('handles empty results', async () => {
-      mockDb.select.mockResolvedValue([]);
-      
-      const result = await getStats();
-      expect(result).toEqual({ recordingsCount: 0, transcriptsCount: 0 });
-    });
+  it('getStats returns the backend counts', async () => {
+    vi.mocked(invoke).mockResolvedValue({ recordingsCount: 2, transcriptsCount: 1 });
+    expect(await getStats()).toEqual({ recordingsCount: 2, transcriptsCount: 1 });
+    expect(invoke).toHaveBeenCalledWith('db_get_stats');
   });
 });
