@@ -499,6 +499,28 @@ fn find_device(host: &cpal::Host, selection: &AudioDeviceSelection) -> Option<cp
     None
 }
 
+/// Checks that the current platform can capture audio from `selection`.
+///
+/// System audio (output device loopback) is captured through PulseAudio /
+/// PipeWire monitor sources on Linux and WASAPI loopback on Windows. macOS
+/// offers no loopback for output devices through `cpal`, so output devices are
+/// not listed there (see `get_audio_devices`). A selection that still names an
+/// output device on macOS is rejected with a clear error instead of being
+/// silently dropped from the recording.
+///
+/// # Errors
+/// * Returns a user-facing message on macOS if `selection` is an output device.
+pub(crate) fn ensure_capture_supported(selection: &AudioDeviceSelection) -> Result<(), String> {
+    if cfg!(target_os = "macos") && selection.is_output {
+        return Err(format!(
+            "Recording system audio from output device \"{}\" is not supported on macOS. \
+             Install a virtual loopback device such as BlackHole and select it as an input device instead.",
+            selection.name
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn start_recording_inner(
     state: &AudioState,
@@ -562,6 +584,11 @@ pub async fn start_recording_inner(
     #[allow(unused_mut)]
     let mut linux_pulse_inputs = Vec::new();
 
+    // Validate every selection before any stream is opened.
+    for selection in &names_to_use {
+        ensure_capture_supported(selection)?;
+    }
+
     for selection in &names_to_use {
         #[cfg(target_os = "linux")]
         {
@@ -573,11 +600,6 @@ pub async fn start_recording_inner(
             }
             linux_pulse_inputs.push(input_name);
             continue;
-        }
-
-        #[cfg(target_os = "macos")]
-        if selection.is_output {
-            continue; // Cannot natively loopback output on macOS with cpal
         }
 
         #[allow(unreachable_code)]
@@ -1011,6 +1033,30 @@ mod tests {
         assert_eq!(rate, 48000);
         assert_eq!(channels, 2);
         assert_eq!(fmt, "f32le");
+    }
+
+    #[test]
+    fn test_ensure_capture_supported() {
+        let input = AudioDeviceSelection {
+            name: "Mic".to_string(),
+            is_input: true,
+            is_output: false,
+        };
+        assert!(ensure_capture_supported(&input).is_ok());
+
+        let output = AudioDeviceSelection {
+            name: "Speakers".to_string(),
+            is_input: false,
+            is_output: true,
+        };
+        let res = ensure_capture_supported(&output);
+        if cfg!(target_os = "macos") {
+            let err = res.unwrap_err();
+            assert!(err.contains("Speakers"));
+            assert!(err.contains("not supported on macOS"));
+        } else {
+            assert!(res.is_ok());
+        }
     }
 
     #[tokio::test]

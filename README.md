@@ -47,6 +47,7 @@ Want to see how it works without downloading the desktop app? Check out the inte
 - Low-latency, high-fidelity capture powered by `cpal` device resolution and TCP loopback streaming to an isolated `ffmpeg` process.
 - Audio is saved directly on your local disk as compressed Opus (`.ogg`) files (`~/Documents/Epi Library/Recordings/`).
 - Supports simultaneous multi-device input and output selection.
+- System audio (what your speakers play, e.g. the other side of a call) is captured from output devices on Linux (PulseAudio / PipeWire monitor sources) and Windows (WASAPI loopback). On macOS only input devices can be recorded; see *OS Support & Operating Notes* below for capturing system audio via a virtual device such as BlackHole.
 
 ### ✍️ Offline Speech-to-Text (WhisperX)
 - Offline transcription using WhisperX running in a managed local Python virtual environment (`whisperx_env`).
@@ -83,7 +84,7 @@ Want to see how it works without downloading the desktop app? Check out the inte
 
 Epi is organized into four core workspace tabs:
 
-1. **Studio Tab**: Microphones and audio output device selection, record/stop button, real-time audio waveform visualization, and live microphone transcription.
+1. **Studio Tab**: Microphones and audio output device selection (output devices on Linux and Windows only), record/stop button, real-time audio waveform visualization, and live microphone transcription.
 2. **Analysis Tab**: Complete transcript editor, speaker label inspection, summary generation, custom prompt template selection, and tag context injection.
 3. **Library Tab**: Filterable recording history with tag search, playback control, re-transcription actions, and granular multi-tier storage deletion options.
 4. **Engine Tab**: Central control center for Ollama model downloading/deletion, WhisperX setup & CPU-only toggle, built-in one-click FFmpeg manager, Global Glossary & Tags configuration, Naming Schemas, Automations, and Cloud API keys stored in the OS keyring.
@@ -141,7 +142,7 @@ Epi is organized into four core workspace tabs:
 
 ## 🚀 Getting Started
 
-Epi runs across platforms and primarily targets **Linux**, while fully supporting **Windows** and **macOS**.
+Epi runs across platforms and primarily targets **Linux**, while also supporting **Windows** and **macOS**. Recording system audio from output devices works on Linux and Windows; on macOS it requires a virtual loopback device (see *OS Support & Operating Notes* below).
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18+)
@@ -177,10 +178,10 @@ npm run tauri build
 
 ## 💻 OS Support & Operating Notes
 
-- **Linux (Primary Target)**: Supported via `.deb` and `.AppImage`. Audio capture integrates natively with PulseAudio / PipeWire monitor sources.
-- **Windows**: Supported via `.msi` and `.exe` installers. Uses WASAPI loopback audio capture. Unsigned binaries trigger Windows Defender SmartScreen ("More info" -> "Run anyway").
+- **Linux (Primary Target)**: Supported via `.deb` and `.AppImage`. Microphones are recorded via PulseAudio / PipeWire sources and output devices via their monitor sources.
+- **Windows**: Supported via `.msi` and `.exe` installers. Microphones are recorded directly and output devices via WASAPI loopback capture. Unsigned binaries trigger Windows Defender SmartScreen ("More info" -> "Run anyway").
 - **macOS**: Supported via `.dmg` installers (Apple Silicon & Intel).
-  - *macOS Audio Note*: Native macOS security restrictions prevent direct recording of system output audio (Speakers/Headphones) via standard APIs. Microphone capture works out of the box. To capture system audio on macOS, install a virtual audio loopback driver such as [BlackHole](https://existential.audio/blackhole/) and select it in the Studio tab.
+  - *macOS Audio Note*: macOS offers no loopback capture of output devices (Speakers/Headphones) through the audio APIs Epi uses, so output devices are not listed in the Studio tab and only input devices (microphones) can be recorded. To capture system audio, install a virtual audio loopback driver such as [BlackHole](https://existential.audio/blackhole/), route your system output to it (for example via a Multi-Output Device in *Audio MIDI Setup* so you can still hear it), and select BlackHole as an input device in the Studio tab alongside your microphone.
   - *macOS Gatekeeper Note*: Unsigned macOS builds trigger an "unidentified developer" warning. Bypass by Control-clicking (or right-clicking) `Epi.app` in Finder and selecting **Open**.
 
 ---

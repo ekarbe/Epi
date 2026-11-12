@@ -114,6 +114,10 @@ pub(crate) fn get_audio_devices_inner(host: &impl AudioHost) -> Result<Vec<Audio
 
 /// Retrieves a list of all available audio input and output devices.
 ///
+/// Output devices are only listed on platforms where their audio can be
+/// captured (Linux monitor sources, Windows WASAPI loopback); on macOS only
+/// input devices are returned.
+///
 /// # Returns
 /// * `Result<Vec<AudioDevice>, String>` - A list of system audio devices.
 ///
