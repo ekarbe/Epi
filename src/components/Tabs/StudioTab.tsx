@@ -91,6 +91,7 @@ export function StudioTab() {
           <div style={{ display: 'flex', gap: '1rem' }}>
             <div style={{ position: 'relative' }}>
               <button 
+                data-testid="select-inputs-btn"
                 onClick={() => { setShowInputSources(!showInputSources); setShowOutputSources(false); }}
                 className="btn-outline" 
                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
@@ -118,7 +119,7 @@ export function StudioTab() {
                       <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>No inputs found</p>
                     ) : (
                       inputs.map((device, idx) => (
-                        <label key={idx} className="source-item" style={{ fontSize: '0.85rem', padding: '0.5rem', background: 'var(--bg-primary)', borderRadius: '0.5rem' }}>
+                        <label key={idx} data-testid="input-device-option" data-device-name={device.name} data-default={device.is_default ? 'true' : 'false'} className="source-item" style={{ fontSize: '0.85rem', padding: '0.5rem', background: 'var(--bg-primary)', borderRadius: '0.5rem' }}>
                           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                             {device.name}
                           </span>
@@ -138,6 +139,7 @@ export function StudioTab() {
 
             <div style={{ position: 'relative' }}>
               <button 
+                data-testid="select-outputs-btn"
                 onClick={() => { setShowOutputSources(!showOutputSources); setShowInputSources(false); }}
                 className="btn-outline" 
                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
@@ -165,7 +167,7 @@ export function StudioTab() {
                       <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>No outputs found</p>
                     ) : (
                       outputs.map((device, idx) => (
-                        <label key={idx} className="source-item" style={{ fontSize: '0.85rem', padding: '0.5rem', background: 'var(--bg-primary)', borderRadius: '0.5rem' }}>
+                        <label key={idx} data-testid="output-device-option" data-device-name={device.name} data-default={device.is_default ? 'true' : 'false'} className="source-item" style={{ fontSize: '0.85rem', padding: '0.5rem', background: 'var(--bg-primary)', borderRadius: '0.5rem' }}>
                           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                             {device.name}
                           </span>
@@ -188,7 +190,7 @@ export function StudioTab() {
 
         
         {recordingError && (
-          <div style={{ padding: '1rem', marginTop: '1rem', background: 'rgba(255, 59, 48, 0.1)', color: 'var(--accent-red)', borderRadius: '0.5rem', textAlign: 'center', border: '1px solid rgba(255, 59, 48, 0.2)' }}>
+          <div data-testid="recording-error" style={{ padding: '1rem', marginTop: '1rem', background: 'rgba(255, 59, 48, 0.1)', color: 'var(--accent-red)', borderRadius: '0.5rem', textAlign: 'center', border: '1px solid rgba(255, 59, 48, 0.2)' }}>
             <div style={{ marginBottom: recordingError.toLowerCase().includes('ffmpeg') ? '0.75rem' : '0' }}>{recordingError}</div>
             {recordingError.toLowerCase().includes('ffmpeg') && (
               <div>
@@ -212,6 +214,7 @@ export function StudioTab() {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3rem', margin: '3rem 0' }}>
           <button 
+            data-testid="record-btn"
             className={`record-btn ${isRecording ? 'recording' : ''}`}
             onClick={toggleRecording}
             disabled={isRecordingTransitioning}
@@ -221,7 +224,7 @@ export function StudioTab() {
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
-              <p className={`time-display ${isRecording ? 'recording' : ''}`}>
+              <p data-testid="recording-timer" className={`time-display ${isRecording ? 'recording' : ''}`}>
                 {formatTime(recordingSeconds)}
               </p>
               <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', fontSize: '1.2rem' }}>
@@ -231,6 +234,7 @@ export function StudioTab() {
             
             <input 
               type="text" 
+              data-testid="recording-label-input"
               placeholder="Recording label (optional)" 
               value={recordingLabel} 
               onChange={(e) => setRecordingLabel(e.target.value)}
@@ -241,6 +245,7 @@ export function StudioTab() {
 
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
               <input 
+                data-testid="auto-transcribe-checkbox"
                 type="checkbox" 
                 checked={autoTranscribe} 
                 onChange={e => setAutoTranscribe(e.target.checked)} 
@@ -282,6 +287,8 @@ export function StudioTab() {
             recentRecordings.map((rec: LibraryRecording) => (
               <div 
                 key={rec.id} 
+                data-testid="recent-recording"
+                data-filename={rec.filename}
                 onClick={() => {
                   loadRecordingIntoAnalysis(rec.id);
                   setActiveTab('analysis');
@@ -296,7 +303,7 @@ export function StudioTab() {
                 <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rec.filename.replace(/\.ogg$/i, '')}</h4>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                   <span>{formatTimestamp(rec.timestamp, 'dateOnly')}</span>
-                  <span>{rec.duration}s</span>
+                  <span data-testid="recent-recording-duration">{rec.duration}s</span>
                 </div>
               </div>
             ))
